@@ -30,8 +30,9 @@ src/grocery_agent/
   recommendation.py      Delivery, pickup and split-basket recommendation rules
   retailer_adapter.py    Runtime adapter boundary for retailer data
   cli.py                 Local command-line admin workflow
+  web_app.py             Local browser portal
 
-tests/                   Security, policy and CLI tests
+tests/                   Security, policy, CLI and portal tests
 ```
 
 ## Running tests
@@ -86,6 +87,23 @@ python .\grocery_agent_cli.py delivery-profile-show --actor michal
 ```
 
 The command output prints only the masked address and delivery profile ID. Do not paste the real address into chat, source code, tests, Git, screenshots, URLs, logs, or emails.
+
+## Local browser portal
+
+Set the master key, then start the local-only portal:
+
+```powershell
+$env:GROCERY_AGENT_MASTER_KEY = "replace-with-a-local-secret-generated-outside-source-control"
+python .\grocery_agent_web.py
+```
+
+Open:
+
+```text
+http://127.0.0.1:8765
+```
+
+Use the `Delivery profile` page as Shay to enter or update the real address locally. The portal does not prefill or display the full address after saving; it shows only the masked profile text and delivery profile ID.
 ## Pickup workflow
 
 Retailer adapters must fetch pickup points and collection windows dynamically during comparison. The engine must not assume a fixed store or pickup point.
@@ -102,4 +120,5 @@ Pickup summaries include retailer, pickup point name, window, pickup fee, final 
 ## Weighted products
 
 Weighted products are included in the estimated total. User-facing output should include the Hebrew notice that the final charge may change according to actual weight.
+
 
