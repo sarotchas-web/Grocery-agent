@@ -58,9 +58,7 @@ def build_handler(profile_path: Path) -> type[BaseHTTPRequestHandler]:
             self._send_html(html)
 
         def log_message(self, format: str, *args: object) -> None:
-            safe_path = urlparse(self.path).path
-            self.log_request(code=getattr(self, "_last_response_code", "-"), size="-")
-            self.log_error("%s %s", self.command, safe_path)
+            return
 
         def _send_html(self, html: str, status: int = 200) -> None:
             self._last_response_code = status
@@ -307,4 +305,5 @@ def _page(title: str, body: str) -> str:
 {body}
 </body>
 </html>"""
+
 
