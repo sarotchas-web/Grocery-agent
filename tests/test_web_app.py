@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -10,7 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from grocery_agent.crypto import EnvMasterKeyCryptoProvider
 from grocery_agent.delivery_profile import DeliveryProfileStore, MASKED_DELIVERY_ADDRESS
 from grocery_agent.models import Role, User
-from grocery_agent.web_app import render_home, render_profile_form, update_delivery_profile_from_form
+from grocery_agent.shufersal_adapter import ShufersalProduct
+from grocery_agent.web_app import (
+    render_home,
+    render_profile_form,
+    render_shufersal_search,
+    update_delivery_profile_from_form,
+)
 
 
 SENSITIVE_TEST_ADDRESS = "SENSITIVE_WEB_ADDRESS_TOKEN_789"
@@ -79,6 +86,25 @@ class WebAppTests(unittest.TestCase):
         self.assertNotIn("New order", home)
         self.assertNotIn("Delivery Profile", profile)
         self.assertNotIn("Back", profile)
+    def test_shufersal_search_renders_public_price_only(self) -> None:
+        product = ShufersalProduct(
+            item_code="7290000000001",
+            name="\u05de\u05d5\u05e6\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4",
+            price_ils=Decimal("12.30"),
+            unit_quantity="\u05d9\u05d7\u05d9\u05d3\u05d4",
+            quantity=Decimal("1"),
+            unit_of_measure="\u05d9\u05d7\u05d9\u05d3\u05d4",
+            unit_price_ils=Decimal("12.30"),
+            weighted=False,
+            updated_at="2099-01-01T03:00:00",
+        )
+
+        html = render_shufersal_search("michal", "\u05de\u05d5\u05e6\u05e8", (product,))
+
+        self.assertIn("\u05d7\u05d9\u05e4\u05d5\u05e9 \u05de\u05d7\u05d9\u05e8\u05d9 \u05de\u05d5\u05e6\u05e8\u05d9\u05dd", html)
+        self.assertIn("\u20aa12.30", html)
+        self.assertNotIn("blob.core.windows.net", html)
+        self.assertNotIn("sig=", html)
 
 if __name__ == "__main__":
     unittest.main()

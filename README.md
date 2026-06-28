@@ -15,6 +15,7 @@ A local household grocery policy engine for comparing delivery and pickup option
 - Pickup eligibility checks for real pickup availability, Emek Hefer area, overlap with 16:30-18:30 Israel time, and full basket availability.
 - Recommendation logic comparing delivery first, then eligible pickup, then split baskets only when savings after all fees are at least 25 ILS.
 - Permission rules for Shay and Michal, including Michal's independent workflow permissions.
+- A read-only Shufersal Online price search using the official public transparency feed for store 413.
 
 ## Project layout
 
@@ -29,6 +30,7 @@ src/grocery_agent/
   pickup.py              Pickup eligibility and summaries
   recommendation.py      Delivery, pickup and split-basket recommendation rules
   retailer_adapter.py    Runtime adapter boundary for retailer data
+  shufersal_adapter.py   Read-only official Shufersal Online price feed
   cli.py                 Local command-line admin workflow
   web_app.py             Local browser portal
   order_portal.py        Shopping list, quote comparison and cart preparation flow

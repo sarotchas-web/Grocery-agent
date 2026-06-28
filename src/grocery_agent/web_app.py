@@ -23,6 +23,11 @@ from grocery_agent.order_portal import (
     render_quote_form,
 )
 from grocery_agent.permissions import can, require_permission
+from grocery_agent.shufersal_adapter import (
+    ShufersalFeedError,
+    ShufersalProduct,
+    ShufersalPublicPriceClient,
+)
 
 
 DEFAULT_PROFILE_PATH = Path(".local") / "delivery-profile.enc"
@@ -35,7 +40,12 @@ def run(host: str = "127.0.0.1", port: int = 8765, profile_path: Path = DEFAULT_
     server.serve_forever()
 
 
-def build_handler(profile_path: Path) -> type[BaseHTTPRequestHandler]:
+def build_handler(
+    profile_path: Path,
+    shufersal_client: ShufersalPublicPriceClient | None = None,
+) -> type[BaseHTTPRequestHandler]:
+    price_client = shufersal_client or ShufersalPublicPriceClient()
+
     class GroceryAgentHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             route = urlparse(self.path)
@@ -45,6 +55,10 @@ def build_handler(profile_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
             if route.path == "/admin/profile":
                 self._send_html(render_profile_form(actor))
+                return
+            if route.path == "/retailers/shufersal":
+                require_permission(actor, "submit_list")
+                self._send_html(_page("\u05de\u05d7\u05d9\u05e8\u05d9 \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc", render_shufersal_search(actor.id)))
                 return
             if route.path == "/orders/new":
                 require_permission(actor, "submit_list")
@@ -59,7 +73,12 @@ def build_handler(profile_path: Path) -> type[BaseHTTPRequestHandler]:
             form = {key: values[0] for key, values in parse_qs(body).items()}
             actor = _actor(form.get("actor", "michal"))
             try:
-                if route.path == "/admin/profile":
+                if route.path == "/retailers/shufersal":
+                    require_permission(actor, "submit_list")
+                    query = form.get("query", "").strip()
+                    products = price_client.search(query)
+                    html = _page("\u05de\u05d7\u05d9\u05e8\u05d9 \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc", render_shufersal_search(actor.id, query, products))
+                elif route.path == "/admin/profile":
                     html = update_delivery_profile_from_form(actor, form, _store(profile_path))
                 elif route.path == "/orders/quotes":
                     require_permission(actor, "submit_list")
@@ -76,6 +95,9 @@ def build_handler(profile_path: Path) -> type[BaseHTTPRequestHandler]:
             except PermissionError as exc:
                 message = str(exc) if str(exc) == BUDGET_ACK_TEXT_HE else "\u05d0\u05d9\u05df \u05d4\u05e8\u05e9\u05d0\u05d4 \u05dc\u05d1\u05e6\u05e2 \u05e4\u05e2\u05d5\u05dc\u05d4 \u05d6\u05d5."
                 self._send_html(render_error(message), status=403)
+                return
+            except ShufersalFeedError as exc:
+                self._send_html(render_error(str(exc)), status=502)
                 return
             except ValueError as exc:
                 self._send_html(render_error(str(exc)), status=400)
@@ -120,6 +142,7 @@ def render_home(actor: User, store: DeliveryProfileStore) -> str:
           <a href="/?actor=shay">\u05e9\u05d9</a>
           <a href="/?actor=michal">\u05de\u05d9\u05db\u05dc</a>
           <a class="primary-link" href="/orders/new?actor={escape(actor.id)}">\u05d4\u05d6\u05de\u05e0\u05d4 \u05d7\u05d3\u05e9\u05d4</a>
+          <a href="/retailers/shufersal?actor={escape(actor.id)}">\u05de\u05d7\u05d9\u05e8\u05d9 \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc</a>
           <a href="/admin/profile?actor=shay">\u05e4\u05e8\u05d5\u05e4\u05d9\u05dc \u05de\u05e9\u05dc\u05d5\u05d7</a>
         </section>
         <section class="band">
@@ -151,6 +174,54 @@ def render_home(actor: User, store: DeliveryProfileStore) -> str:
         </section>
         """,
     )
+
+
+def render_shufersal_search(
+    actor_id: str,
+    query: str = "",
+    products: tuple[ShufersalProduct, ...] = (),
+) -> str:
+    if products:
+        rows = "".join(
+            f"<tr><td>{escape(product.name)}</td><td>{escape(product.item_code)}</td>"
+            f"<td>\u20aa{product.price_ils}</td>"
+            f"<td>{escape(product.unit_quantity or product.unit_of_measure)}</td>"
+            f"<td>{_yes_no(product.weighted)}</td>"
+            f"<td>{escape(product.updated_at)}</td></tr>"
+            for product in products
+        )
+        results = f"""
+        <section class="table-band">
+          <h2>\u05ea\u05d5\u05e6\u05d0\u05d5\u05ea ({len(products)})</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>\u05de\u05d5\u05e6\u05e8</th><th>\u05d1\u05e8\u05e7\u05d5\u05d3</th><th>\u05de\u05d7\u05d9\u05e8</th><th>\u05d9\u05d7\u05d9\u05d3\u05d4</th><th>\u05d1\u05de\u05e9\u05e7\u05dc</th><th>\u05e2\u05d5\u05d3\u05db\u05df</th></tr></thead>
+            <tbody>{rows}</tbody>
+          </table></div>
+        </section>
+        """
+    elif query:
+        results = '<section class="band"><p>\u05dc\u05d0 \u05e0\u05de\u05e6\u05d0\u05d5 \u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05ea\u05d5\u05d0\u05de\u05d9\u05dd.</p></section>'
+    else:
+        results = ""
+    return f"""
+    <section class="toolbar"><a href="/?actor={escape(actor_id)}">\u05d7\u05d6\u05e8\u05d4</a></section>
+    <section class="band">
+      <p class="eyebrow">\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE</p>
+      <h1>\u05d7\u05d9\u05e4\u05d5\u05e9 \u05de\u05d7\u05d9\u05e8\u05d9 \u05de\u05d5\u05e6\u05e8\u05d9\u05dd</h1>
+      <p class="muted">\u05d4\u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05e0\u05e7\u05e8\u05d0\u05d9\u05dd \u05de\u05d0\u05ea\u05e8 \u05e9\u05e7\u05d9\u05e4\u05d5\u05ea \u05d4\u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05d4\u05e8\u05e9\u05de\u05d9. \u05d3\u05de\u05d9 \u05de\u05e9\u05dc\u05d5\u05d7, \u05d6\u05de\u05d9\u05e0\u05d5\u05ea \u05d5\u05de\u05d1\u05e6\u05e2\u05d9\u05dd \u05d0\u05d9\u05e9\u05d9\u05d9\u05dd \u05e0\u05d1\u05d3\u05e7\u05d9\u05dd \u05d1\u05e7\u05d5\u05e4\u05d4.</p>
+    </section>
+    <form method="post" action="/retailers/shufersal" class="form">
+      <input type="hidden" name="actor" value="{escape(actor_id)}">
+      <label>\u05e9\u05dd \u05de\u05d5\u05e6\u05e8 \u05d0\u05d5 \u05d1\u05e8\u05e7\u05d5\u05d3
+        <input name="query" value="{escape(query)}" required autocomplete="off">
+      </label>
+      <button type="submit">\u05d7\u05d9\u05e4\u05d5\u05e9</button>
+    </form>
+    {results}
+    """
+
+def _yes_no(value: bool) -> str:
+    return "\u05db\u05df" if value else "\u05dc\u05d0"
 
 
 def _actor_display_name(actor: User) -> str:

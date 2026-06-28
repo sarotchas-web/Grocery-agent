@@ -1,4 +1,4 @@
-﻿# Security Notes
+# Security Notes
 
 ## Sensitive data rules
 
@@ -49,6 +49,12 @@ Recommended rotation procedure:
 8. Delete temporary plaintext variables and shell history entries that may contain sensitive material.
 
 Never write the old or new key to source control, documentation examples, tickets, chat logs, or screenshots.
+
+## Public retailer feeds
+
+The Shufersal adapter reads only the official public price-transparency feed for Online store 413. The feed page generates a temporary public download link. The adapter validates the HTTPS host and file path, uses the link only in memory, and never stores or logs it. Raw feed responses are not exposed through portal responses.
+
+The adapter does not authenticate to a retailer account, create a basket, access personal promotions, select delivery or pickup windows, or perform checkout.
 
 ## Production note
 
