@@ -1,4 +1,4 @@
-﻿# Grocery Agent
+# Grocery Agent
 
 A local household grocery policy engine for comparing delivery and pickup options without storing real delivery details in source code.
 
@@ -31,6 +31,7 @@ src/grocery_agent/
   retailer_adapter.py    Runtime adapter boundary for retailer data
   cli.py                 Local command-line admin workflow
   web_app.py             Local browser portal
+  order_portal.py        Shopping list, quote comparison and cart preparation flow
 
 tests/                   Security, policy, CLI and portal tests
 ```
@@ -104,6 +105,21 @@ http://127.0.0.1:8765
 ```
 
 Use the `Delivery profile` page as Shay to enter or update the real address locally. The portal does not prefill or display the full address after saving; it shows only the masked profile text and delivery profile ID.
+
+## Starting an order
+
+Select `New order` in the local portal as Shay or Michal:
+
+1. Enter one shopping item per line.
+2. Add current basket quote figures for one or two retailers.
+3. Include discounts, promotions, delivery and service fees.
+4. Add pickup details only when the retailer currently offers pickup.
+5. Review the eligible delivery and pickup comparison and its Hebrew recommendation.
+6. Acknowledge the budget only when the selected estimate is greater than 800 ILS.
+7. Approve cart preparation.
+
+The local workflow does not log in to retailers, invent live prices, place a purchase, or handle payment data. Retailer checkout remains outside this project until an authorized live adapter is configured.
+
 ## Pickup workflow
 
 Retailer adapters must fetch pickup points and collection windows dynamically during comparison. The engine must not assume a fixed store or pickup point.

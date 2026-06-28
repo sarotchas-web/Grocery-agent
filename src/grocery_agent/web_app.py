@@ -15,7 +15,14 @@ from grocery_agent.delivery_profile import (
     profile_api_response,
 )
 from grocery_agent.models import Role, User, money
-from grocery_agent.permissions import can
+from grocery_agent.order_portal import (
+    compare_order_form,
+    render_approval,
+    render_comparison,
+    render_new_order_form,
+    render_quote_form,
+)
+from grocery_agent.permissions import can, require_permission
 
 
 DEFAULT_PROFILE_PATH = Path(".local") / "delivery-profile.enc"
@@ -39,21 +46,38 @@ def build_handler(profile_path: Path) -> type[BaseHTTPRequestHandler]:
             if route.path == "/admin/profile":
                 self._send_html(render_profile_form(actor))
                 return
+            if route.path == "/orders/new":
+                require_permission(actor, "submit_list")
+                self._send_html(_page("New Order", render_new_order_form(actor.id)))
+                return
             self.send_error(404)
 
         def do_POST(self) -> None:
             route = urlparse(self.path)
-            if route.path != "/admin/profile":
-                self.send_error(404)
-                return
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode("utf-8")
             form = {key: values[0] for key, values in parse_qs(body).items()}
             actor = _actor(form.get("actor", "michal"))
             try:
-                html = update_delivery_profile_from_form(actor, form, _store(profile_path))
-            except PermissionError:
-                self._send_html(render_error("Only Shay can edit the delivery profile."), status=403)
+                if route.path == "/admin/profile":
+                    html = update_delivery_profile_from_form(actor, form, _store(profile_path))
+                elif route.path == "/orders/quotes":
+                    require_permission(actor, "submit_list")
+                    html = _page("Retailer Quotes", render_quote_form(actor.id, form.get("items", "")))
+                elif route.path == "/orders/recommend":
+                    require_permission(actor, "choose_fulfillment")
+                    html = _page("Order Recommendation", render_comparison(actor.id, compare_order_form(form)))
+                elif route.path == "/orders/approve":
+                    require_permission(actor, "approve_cart_preparation")
+                    html = _page("Cart Preparation Approved", render_approval(form))
+                else:
+                    self.send_error(404)
+                    return
+            except PermissionError as exc:
+                self._send_html(render_error(str(exc)), status=403)
+                return
+            except ValueError as exc:
+                self._send_html(render_error(str(exc)), status=400)
                 return
             self._send_html(html)
 
@@ -94,6 +118,7 @@ def render_home(actor: User, store: DeliveryProfileStore) -> str:
         <section class="toolbar">
           <a href="/?actor=shay">Shay</a>
           <a href="/?actor=michal">Michal</a>
+          <a class="primary-link" href="/orders/new?actor={escape(actor.id)}">New order</a>
           <a href="/admin/profile?actor=shay">Delivery profile</a>
         </section>
         <section class="band">
@@ -239,6 +264,10 @@ def _page(title: str, body: str) -> str:
       font-weight: 700;
       border-radius: 6px;
     }}
+    .primary-link {{
+      background: var(--accent);
+      color: white;
+    }}
     button {{
       background: var(--accent);
       color: white;
@@ -292,12 +321,38 @@ def _page(title: str, body: str) -> str:
       padding: 20px;
     }}
     label {{ display: grid; gap: 6px; font-weight: 700; }}
-    input {{
+    input, textarea {{
       min-height: 40px;
       border: 1px solid var(--line);
       border-radius: 6px;
       padding: 8px 10px;
       font: inherit;
+    }}
+    textarea {{ resize: vertical; }}
+    .eyebrow {{ margin: 0 0 8px; color: var(--accent); font-size: 13px; font-weight: 700; text-transform: uppercase; }}
+    .compact-list {{ margin: 12px 0 0; padding-left: 20px; }}
+    .quote-form {{ display: grid; gap: 18px; padding: 20px; }}
+    fieldset {{ margin: 0; padding: 18px; border: 1px solid var(--line); border-radius: 6px; }}
+    legend {{ padding: 0 6px; font-size: 18px; font-weight: 700; }}
+    .fields {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }}
+    .checks {{ display: flex; flex-wrap: wrap; gap: 16px; margin: 16px 0; }}
+    .checks label, .ack {{ display: flex; grid-template-columns: none; align-items: center; gap: 8px; }}
+    .checks input, .ack input {{ min-height: auto; width: 18px; height: 18px; }}
+    .form-actions {{ display: flex; justify-content: flex-end; }}
+    .table-band {{ padding: 20px; border-bottom: 1px solid var(--line); }}
+    .table-wrap {{ overflow-x: auto; }}
+    table {{ width: 100%; border-collapse: collapse; min-width: 760px; }}
+    th, td {{ padding: 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }}
+    th {{ color: var(--muted); font-size: 13px; }}
+    .total {{ font-size: 18px; }}
+    .warning {{ color: var(--warn); }}
+    .ok {{ color: var(--accent); font-weight: 700; }}
+    .success {{ border-left: 5px solid var(--accent); }}
+    @media (max-width: 640px) {{
+      .toolbar {{ flex-wrap: wrap; }}
+      .band, .grid, .quote-form, .form, .table-band {{ padding: 16px; }}
+      .fields {{ grid-template-columns: 1fr; }}
+      .form-actions button {{ width: 100%; }}
     }}
   </style>
 </head>
