@@ -118,7 +118,7 @@ Select `New order` in the local portal as Shay or Michal:
 6. Acknowledge the budget only when the selected estimate is greater than 800 ILS.
 7. Approve cart preparation.
 
-The local workflow does not log in to retailers, invent live prices, place a purchase, or handle payment data. Retailer checkout remains outside this project until an authorized live adapter is configured.
+The local workflow does not log in to retailers, invent live prices, place a purchase, or handle payment data. Retailer checkout remains outside this project until an authorized live adapter is configured. See [RETAILER_INTEGRATION.md](RETAILER_INTEGRATION.md) for the approved connection process.
 
 ## Pickup workflow
 

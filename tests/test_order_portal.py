@@ -82,7 +82,7 @@ class OrderPortalTests(unittest.TestCase):
         self.assertEqual(comparison.recommendation.orders[0].mode, FulfillmentMode.PICKUP)
         html = render_comparison("michal", comparison)
         self.assertIn("Collection Point", html)
-        self.assertIn("17:00-18:00 Asia/Jerusalem", html)
+        self.assertIn("17:00\u201318:00 \u05e9\u05e2\u05d5\u05df \u05d9\u05e9\u05e8\u05d0\u05dc", html)
 
     def test_ineligible_pickup_falls_back_to_delivery(self) -> None:
         form = quote_form("700")
@@ -118,8 +118,17 @@ class OrderPortalTests(unittest.TestCase):
                 "budget_ack": "yes",
             }
         )
-        self.assertIn("Approved", approved)
+        self.assertIn("\u05d0\u05d5\u05e9\u05e8", approved)
 
+    def test_order_forms_use_hebrew_labels(self) -> None:
+        new_order = render_new_order_form("michal")
+        quotes = render_quote_form("michal", "\u05d7\u05dc\u05d1")
+
+        self.assertIn("\u05d1\u05e0\u05d9\u05d9\u05ea \u05e8\u05e9\u05d9\u05de\u05ea \u05d4\u05e7\u05e0\u05d9\u05d5\u05ea", new_order)
+        self.assertIn("\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9\u05dd", quotes)
+        self.assertNotIn("Build your shopping list", new_order)
+        self.assertNotIn("Retailer comparison", quotes)
+        self.assertNotIn("Compare options", quotes)
 
 if __name__ == "__main__":
     unittest.main()

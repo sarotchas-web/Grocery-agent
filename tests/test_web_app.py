@@ -40,7 +40,7 @@ class WebAppTests(unittest.TestCase):
         )
 
         self.assertIn(MASKED_DELIVERY_ADDRESS, html)
-        self.assertIn("delivery_profile_id=dp_web_test", html)
+        self.assertIn("\u05de\u05d6\u05d4\u05d4 \u05e4\u05e8\u05d5\u05e4\u05d9\u05dc: dp_web_test", html)
         self.assertNotIn(SENSITIVE_TEST_ADDRESS, html)
         self.assertNotIn(SENSITIVE_TEST_ADDRESS, self.profile_path.read_text(encoding="utf-8"))
 
@@ -61,13 +61,24 @@ class WebAppTests(unittest.TestCase):
 
         self.assertIn(MASKED_DELIVERY_ADDRESS, html)
         self.assertNotIn(SENSITIVE_TEST_ADDRESS, html)
-        self.assertIn("Choose delivery or pickup", html)
+        self.assertIn("\u05d1\u05d7\u05d9\u05e8\u05ea \u05de\u05e9\u05dc\u05d5\u05d7 \u05d0\u05d5 \u05d0\u05d9\u05e1\u05d5\u05e3", html)
 
     def test_home_renders_budget_amounts_with_shekel_symbol(self) -> None:
         html = render_home(self.michal, self.store)
 
         self.assertIn("\u20aa800.00", html)
         self.assertIn("\u20aa800.01", html)
+
+    def test_portal_uses_hebrew_rtl_interface(self) -> None:
+        home = render_home(self.michal, self.store)
+        profile = render_profile_form(self.shay)
+
+        self.assertIn('<html lang="he" dir="rtl">', home)
+        self.assertIn("\u05d4\u05d6\u05de\u05e0\u05d4 \u05d7\u05d3\u05e9\u05d4", home)
+        self.assertIn("\u05e4\u05e8\u05d5\u05e4\u05d9\u05dc \u05de\u05e9\u05dc\u05d5\u05d7", profile)
+        self.assertNotIn("New order", home)
+        self.assertNotIn("Delivery Profile", profile)
+        self.assertNotIn("Back", profile)
 
 if __name__ == "__main__":
     unittest.main()
