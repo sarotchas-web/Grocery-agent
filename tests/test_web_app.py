@@ -63,6 +63,11 @@ class WebAppTests(unittest.TestCase):
         self.assertNotIn(SENSITIVE_TEST_ADDRESS, html)
         self.assertIn("Choose delivery or pickup", html)
 
+    def test_home_renders_budget_amounts_with_shekel_symbol(self) -> None:
+        html = render_home(self.michal, self.store)
+
+        self.assertIn("\u20aa800.00", html)
+        self.assertIn("\u20aa800.01", html)
 
 if __name__ == "__main__":
     unittest.main()

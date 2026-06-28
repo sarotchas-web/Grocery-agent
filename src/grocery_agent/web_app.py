@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -109,8 +109,8 @@ def render_home(actor: User, store: DeliveryProfileStore) -> str:
           <div>
             <h2>Budget Policy</h2>
             <dl>
-              <dt>Threshold</dt><dd>ג‚×800.00</dd>
-              <dt>Warning starts</dt><dd>ג‚×800.01</dd>
+              <dt>Threshold</dt><dd>\u20aa800.00</dd>
+              <dt>Warning starts</dt><dd>\u20aa800.01</dd>
               <dt>Acknowledgement</dt><dd>{escape(warning_text)}</dd>
             </dl>
           </div>
