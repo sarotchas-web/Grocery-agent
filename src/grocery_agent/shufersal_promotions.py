@@ -59,6 +59,13 @@ class ShufersalProductOffer:
     effective_price_ils: Decimal
 
 
+@dataclass(frozen=True)
+class ShufersalConnectionStatus:
+    product_count: int
+    promotion_count: int
+    latest_price_update: str
+
+
 FetchBytes = Callable[[str, int], bytes]
 
 
@@ -77,6 +84,16 @@ class ShufersalPublicOfferClient:
         self._promotions: tuple[ShufersalPromotion, ...] | None = None
         self._promotions_loaded_at = 0.0
         self._lock = threading.Lock()
+
+    def status(self, refresh: bool = False) -> ShufersalConnectionStatus:
+        products = self._price_client.catalog(refresh=refresh)
+        promotions = self.promotions(refresh=refresh)
+        latest_update = max((product.updated_at for product in products), default="")
+        return ShufersalConnectionStatus(
+            product_count=len(products),
+            promotion_count=len(promotions),
+            latest_price_update=latest_update,
+        )
 
     def search(self, query: str, limit: int = 20) -> tuple[ShufersalProductOffer, ...]:
         products = self._price_client.search(query, limit=limit)

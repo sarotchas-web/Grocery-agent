@@ -76,6 +76,9 @@ class _PriceClient:
     def __init__(self, product: ShufersalProduct):
         self.product = product
 
+    def catalog(self, refresh: bool = False) -> tuple[ShufersalProduct, ...]:
+        return (self.product,)
+
     def search(self, query: str, limit: int = 20) -> tuple[ShufersalProduct, ...]:
         return (self.product,) if query else ()
 
@@ -130,6 +133,13 @@ class ShufersalPromotionTests(unittest.TestCase):
         with self.assertRaises(ShufersalFeedError):
             parse_promotions(xml)
 
+    def test_connection_status_reports_only_public_feed_metadata(self) -> None:
+        status = self._client(_promotion_xml()).status()
+
+        self.assertEqual(status.product_count, 1)
+        self.assertEqual(status.promotion_count, 1)
+        self.assertEqual(status.latest_price_update, "2099-01-01T03:00:00")
+
     def test_basket_totals_use_safe_public_price_and_marks_weighted_items(self) -> None:
         offer = ShufersalProductOffer(
             product=_product(weighted=True),
@@ -144,6 +154,7 @@ class ShufersalPromotionTests(unittest.TestCase):
         self.assertEqual(basket.estimated_total_ils, Decimal("17.00"))
         self.assertEqual(basket.public_savings_ils, Decimal("3.00"))
         self.assertTrue(basket.has_weighted_items)
+        self.assertEqual(basket.shopping_list_text, "synthetic product x 2")
 
     def test_baskets_are_isolated_by_actor(self) -> None:
         offer = ShufersalProductOffer(_product(), (), Decimal("10.00"))

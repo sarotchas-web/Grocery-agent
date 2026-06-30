@@ -42,6 +42,13 @@ class ShufersalBasket:
     def has_weighted_items(self) -> bool:
         return any(line.offer.product.weighted for line in self.lines)
 
+    @property
+    def shopping_list_text(self) -> str:
+        return "\n".join(
+            f"{line.offer.product.name} x {line.quantity:g}"
+            for line in self.lines
+        )
+
 
 class ShufersalBasketStore:
     """Process-local basket selection with no credentials or checkout data."""

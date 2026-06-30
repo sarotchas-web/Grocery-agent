@@ -52,7 +52,7 @@ Never write the old or new key to source control, documentation examples, ticket
 
 ## Public retailer feeds
 
-The Shufersal adapter reads only the official public price and promotion transparency feeds for Online store 413. The feed page generates a temporary public download link. The adapter validates the HTTPS host and file path, uses the link only in memory, and never stores or logs it. Raw feed responses are not exposed through portal responses.
+The Shufersal adapter reads only the official public price and promotion transparency feeds for Online store 413. The feed page generates a temporary public download link. The adapter validates the HTTPS host and file path, uses the link only in memory, and never stores or logs it. Raw feed responses are not exposed through portal responses. The connection-status page exposes only public feed counts and the public price update timestamp; it never renders the temporary download URL.
 
 The adapter does not authenticate to a retailer account, access personal promotions, select delivery or pickup windows, or perform checkout. Its basket is process-local estimate state only, contains public product data and quantities, and is never sent to Shufersal.
 

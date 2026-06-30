@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -9,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from grocery_agent.budget import BUDGET_ACK_TEXT_HE
 from grocery_agent.models import FulfillmentMode
 from grocery_agent.order_portal import (
+    RetailerQuotePrefill,
     compare_order_form,
     parse_shopping_list,
     render_approval,
@@ -119,6 +121,25 @@ class OrderPortalTests(unittest.TestCase):
             }
         )
         self.assertIn("\u05d0\u05d5\u05e9\u05e8", approved)
+
+    def test_live_shufersal_prefill_requires_manual_availability_and_fees(self) -> None:
+        html = render_quote_form(
+            "michal",
+            "synthetic product x 2",
+            prefill=RetailerQuotePrefill(
+                retailer="\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE",
+                subtotal=Decimal("20.00"),
+                promotions=Decimal("3.00"),
+                weighted=True,
+            ),
+        )
+
+        self.assertIn('name="a_retailer" value="\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE"', html)
+        self.assertIn('name="a_subtotal" type="number" min="0" step="0.01" value="20.00"', html)
+        self.assertIn('name="a_promotions" type="number" min="0" step="0.01" value="3.00"', html)
+        self.assertIn('name="a_delivery_fee" type="number" min="0" step="0.01" value="" required', html)
+        self.assertNotIn('name="a_available" value="yes" checked', html)
+        self.assertIn('name="a_weighted" value="yes" checked', html)
 
     def test_order_forms_use_hebrew_labels(self) -> None:
         new_order = render_new_order_form("michal")

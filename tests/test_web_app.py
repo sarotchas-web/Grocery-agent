@@ -12,11 +12,15 @@ from grocery_agent.crypto import EnvMasterKeyCryptoProvider
 from grocery_agent.delivery_profile import DeliveryProfileStore, MASKED_DELIVERY_ADDRESS
 from grocery_agent.models import Role, User
 from grocery_agent.shufersal_adapter import ShufersalProduct
-from grocery_agent.shufersal_promotions import ShufersalProductOffer
+from grocery_agent.shufersal_promotions import (
+    ShufersalConnectionStatus,
+    ShufersalProductOffer,
+)
 from grocery_agent.web_app import (
     render_home,
     render_profile_form,
     render_shufersal_search,
+    render_shufersal_status,
     update_delivery_profile_from_form,
 )
 
@@ -87,6 +91,22 @@ class WebAppTests(unittest.TestCase):
         self.assertNotIn("New order", home)
         self.assertNotIn("Delivery Profile", profile)
         self.assertNotIn("Back", profile)
+    def test_shufersal_status_renders_only_safe_public_metadata(self) -> None:
+        html = render_shufersal_status(
+            "michal",
+            ShufersalConnectionStatus(
+                product_count=123,
+                promotion_count=45,
+                latest_price_update="2099-01-01T03:00:00",
+            ),
+        )
+
+        self.assertIn("123", html)
+        self.assertIn("45", html)
+        self.assertIn("2099-01-01T03:00:00", html)
+        self.assertNotIn("blob.core.windows.net", html)
+        self.assertNotIn("sig=", html)
+
     def test_shufersal_search_renders_public_price_only(self) -> None:
         product = ShufersalProduct(
             item_code="7290000000001",

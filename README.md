@@ -117,6 +117,17 @@ Open `Shufersal prices` in the Hebrew portal to search the official Online store
 
 No retailer login, credential, payment detail, delivery address, or temporary signed feed URL is stored or rendered by this workflow.
 
+## Testing the live public connection
+
+1. Start the portal and open `http://127.0.0.1:8765`.
+2. Select `מחירי שופרסל`, then `מצב החיבור`. A successful page shows public product and promotion counts for Online store 413.
+3. Search for a product such as `חלב` and add one result to the local basket.
+4. Open `הסל שלי` and select `מעבר להשוואת הזמנה`.
+5. The Shufersal retailer name, public item subtotal, public promotion savings, and product list are prefilled.
+6. Confirm whole-basket availability and enter the current delivery and service fees from retailer checkout before comparing.
+
+This is a live read-only public-data connection. It does not sign in, transmit the delivery profile, create a retailer-side basket, reserve stock, select a real pickup window, place an order, or transmit payment data. Those actions require an authorized retailer API and separate user confirmation.
+
 ## Starting an order
 
 Select `New order` in the local portal as Shay or Michal:

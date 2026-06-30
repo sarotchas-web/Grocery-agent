@@ -16,6 +16,7 @@ from grocery_agent.delivery_profile import (
 )
 from grocery_agent.models import Role, User, money
 from grocery_agent.order_portal import (
+    RetailerQuotePrefill,
     compare_order_form,
     render_approval,
     render_comparison,
@@ -26,6 +27,7 @@ from grocery_agent.permissions import can, require_permission
 from grocery_agent.shufersal_adapter import ShufersalFeedError
 from grocery_agent.shufersal_basket import ShufersalBasket, ShufersalBasketStore
 from grocery_agent.shufersal_promotions import (
+    ShufersalConnectionStatus,
     ShufersalProductOffer,
     ShufersalPublicOfferClient,
 )
@@ -68,6 +70,39 @@ def build_handler(
                     _page(
                         "\u05e1\u05dc \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc",
                         render_shufersal_basket(actor.id, basket_store.get(actor.id)),
+                    )
+                )
+                return
+            if route.path == "/retailers/shufersal/basket/compare":
+                require_permission(actor, "submit_list")
+                basket = basket_store.get(actor.id)
+                if not basket.lines:
+                    self._send_html(render_error("\u05d9\u05e9 \u05dc\u05d4\u05d5\u05e1\u05d9\u05e3 \u05dc\u05e4\u05d7\u05d5\u05ea \u05de\u05d5\u05e6\u05e8 \u05d0\u05d7\u05d3 \u05dc\u05e1\u05dc."), status=400)
+                    return
+                prefill = RetailerQuotePrefill(
+                    retailer="\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE",
+                    subtotal=basket.regular_total_ils,
+                    promotions=basket.public_savings_ils,
+                    weighted=basket.has_weighted_items,
+                )
+                self._send_html(
+                    _page(
+                        "\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d4\u05d6\u05de\u05e0\u05d4",
+                        render_quote_form(actor.id, basket.shopping_list_text, prefill=prefill),
+                    )
+                )
+                return
+            if route.path == "/retailers/shufersal/status":
+                require_permission(actor, "submit_list")
+                try:
+                    status = offer_client.status()
+                except ShufersalFeedError as exc:
+                    self._send_html(render_error(str(exc)), status=502)
+                    return
+                self._send_html(
+                    _page(
+                        "\u05de\u05e6\u05d1 \u05d7\u05d9\u05d1\u05d5\u05e8 \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc",
+                        render_shufersal_status(actor.id, status),
                     )
                 )
                 return
@@ -226,6 +261,7 @@ def render_shufersal_search(
     <section class="toolbar">
       <a href="/?actor={escape(actor_id)}">\u05d7\u05d6\u05e8\u05d4</a>
       <a href="/retailers/shufersal/basket?actor={escape(actor_id)}">\u05d4\u05e1\u05dc \u05e9\u05dc\u05d9</a>
+      <a href="/retailers/shufersal/status?actor={escape(actor_id)}">\u05de\u05e6\u05d1 \u05d4\u05d7\u05d9\u05d1\u05d5\u05e8</a>
     </section>
     <section class="band">
       <p class="eyebrow">\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE</p>
@@ -283,11 +319,32 @@ def _promotion_summary(offer: ShufersalProductOffer) -> str:
     return "<br>".join(labels)
 
 
+def render_shufersal_status(actor_id: str, status: ShufersalConnectionStatus) -> str:
+    updated = escape(status.latest_price_update or "\u05dc\u05d0 \u05e0\u05de\u05e1\u05e8")
+    return f"""
+    <section class="toolbar">
+      <a href="/retailers/shufersal?actor={escape(actor_id)}">\u05d7\u05d6\u05e8\u05d4 \u05dc\u05d7\u05d9\u05e4\u05d5\u05e9</a>
+    </section>
+    <section class="band success">
+      <p class="eyebrow">\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE, \u05e1\u05e0\u05d9\u05e3 413</p>
+      <h1>\u05d4\u05d7\u05d9\u05d1\u05d5\u05e8 \u05dc\u05e0\u05ea\u05d5\u05e0\u05d9\u05dd \u05d4\u05e6\u05d9\u05d1\u05d5\u05e8\u05d9\u05d9\u05dd \u05e4\u05e2\u05d9\u05dc</h1>
+      <dl>
+        <dt>\u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05e9\u05e0\u05d8\u05e2\u05e0\u05d5</dt><dd>{status.product_count}</dd>
+        <dt>\u05de\u05d1\u05e6\u05e2\u05d9\u05dd \u05e6\u05d9\u05d1\u05d5\u05e8\u05d9\u05d9\u05dd</dt><dd>{status.promotion_count}</dd>
+        <dt>\u05e2\u05d3\u05db\u05d5\u05df \u05de\u05d7\u05d9\u05e8 \u05d0\u05d7\u05e8\u05d5\u05df \u05d1\u05e7\u05d5\u05d1\u05e5</dt><dd>{updated}</dd>
+      </dl>
+    </section>
+    <section class="band">
+      <h2>\u05de\u05d4 \u05e2\u05d3\u05d9\u05d9\u05df \u05d3\u05d5\u05e8\u05e9 \u05d0\u05d9\u05e9\u05d5\u05e8 \u05d1\u05e7\u05d5\u05e4\u05d4</h2>
+      <p class="muted">\u05d6\u05de\u05d9\u05e0\u05d5\u05ea \u05dc\u05e4\u05d9 \u05db\u05ea\u05d5\u05d1\u05ea, \u05d3\u05de\u05d9 \u05de\u05e9\u05dc\u05d5\u05d7 \u05d5\u05e9\u05d9\u05e8\u05d5\u05ea, \u05d0\u05e4\u05e9\u05e8\u05d5\u05d9\u05d5\u05ea \u05d0\u05d9\u05e1\u05d5\u05e3, \u05d7\u05dc\u05d5\u05e0\u05d5\u05ea \u05d6\u05de\u05df, \u05de\u05d1\u05e6\u05e2\u05d9\u05dd \u05d0\u05d9\u05e9\u05d9\u05d9\u05dd \u05d5\u05de\u05d7\u05d9\u05e8 \u05d4\u05e7\u05d5\u05e4\u05d4. \u05dc\u05d0 \u05de\u05d5\u05e2\u05d1\u05e8\u05d9\u05dd \u05e4\u05e8\u05d8\u05d9 \u05d4\u05ea\u05d7\u05d1\u05e8\u05d5\u05ea, \u05db\u05ea\u05d5\u05d1\u05ea \u05d0\u05d5 \u05ea\u05e9\u05dc\u05d5\u05dd.</p>
+    </section>
+    """
+
 def render_shufersal_basket(actor_id: str, basket: ShufersalBasket) -> str:
     toolbar = f"""
     <section class="toolbar">
       <a href="/retailers/shufersal?actor={escape(actor_id)}">\u05d4\u05de\u05e9\u05da \u05d7\u05d9\u05e4\u05d5\u05e9</a>
-      <a href="/orders/new?actor={escape(actor_id)}">\u05de\u05e2\u05d1\u05e8 \u05dc\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d4\u05d6\u05de\u05e0\u05d4</a>
+      <a href="/retailers/shufersal/basket/compare?actor={escape(actor_id)}">\u05de\u05e2\u05d1\u05e8 \u05dc\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d4\u05d6\u05de\u05e0\u05d4</a>
     </section>
     """
     if not basket.lines:
@@ -531,6 +588,11 @@ def _page(title: str, body: str) -> str:
     .inline-form input[type="number"] {{ width: 76px; min-height: 36px; }}
     .inline-form button {{ white-space: nowrap; }}
     .secondary {{ background: white; color: var(--accent); }}
+    .connection-note {{
+      padding: 12px;
+      border-right: 4px solid var(--accent);
+      background: #eef8f3;
+    }}
     .table-band {{ padding: 20px; border-bottom: 1px solid var(--line); }}
     .table-wrap {{ overflow-x: auto; }}
     table {{ width: 100%; border-collapse: collapse; min-width: 760px; }}

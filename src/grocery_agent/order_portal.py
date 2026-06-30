@@ -27,6 +27,14 @@ class OrderComparison:
     recommendation: Recommendation
 
 
+@dataclass(frozen=True)
+class RetailerQuotePrefill:
+    retailer: str
+    subtotal: Decimal
+    promotions: Decimal
+    weighted: bool = False
+
+
 def parse_shopping_list(raw: str) -> tuple[str, ...]:
     items = tuple(line.strip() for line in raw.splitlines() if line.strip())
     if not items:
@@ -70,9 +78,19 @@ def render_new_order_form(actor_id: str) -> str:
     """
 
 
-def render_quote_form(actor_id: str, items_raw: str) -> str:
+def render_quote_form(
+    actor_id: str,
+    items_raw: str,
+    prefill: RetailerQuotePrefill | None = None,
+) -> str:
     items = parse_shopping_list(items_raw)
     item_rows = "".join(f"<li>{escape(item)}</li>" for item in items)
+    live_notice = (
+        '<p class="connection-note"><strong>\u05e0\u05ea\u05d5\u05e0\u05d9 \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc \u05d4\u05e6\u05d9\u05d1\u05d5\u05e8\u05d9\u05d9\u05dd \u05e0\u05d8\u05e2\u05e0\u05d5.</strong> '
+        '\u05d9\u05e9 \u05dc\u05d0\u05e9\u05e8 \u05d9\u05d3\u05e0\u05d9\u05ea \u05d0\u05ea \u05d6\u05de\u05d9\u05e0\u05d5\u05ea \u05db\u05dc \u05d4\u05e1\u05dc \u05d5\u05dc\u05d4\u05d6\u05d9\u05df \u05d3\u05de\u05d9 \u05de\u05e9\u05dc\u05d5\u05d7 \u05d5\u05e9\u05d9\u05e8\u05d5\u05ea \u05de\u05d4\u05e7\u05d5\u05e4\u05d4. \u05d0\u05d9\u05e1\u05d5\u05e3 \u05d9\u05d5\u05e6\u05d2 \u05e8\u05e7 \u05dc\u05d0\u05d7\u05e8 \u05d4\u05d6\u05e0\u05ea \u05e0\u05e7\u05d5\u05d3\u05d4 \u05d5\u05d7\u05dc\u05d5\u05df \u05d0\u05de\u05d9\u05ea\u05d9\u05d9\u05dd.</p>'
+        if prefill
+        else ""
+    )
     return f"""
     <section class="toolbar">
       <a href="/orders/new?actor={escape(actor_id)}">\u05d7\u05d6\u05e8\u05d4</a>
@@ -81,12 +99,13 @@ def render_quote_form(actor_id: str, items_raw: str) -> str:
       <p class="eyebrow">\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9\u05dd</p>
       <h1>\u05d4\u05d5\u05e1\u05e4\u05ea \u05d4\u05e6\u05e2\u05d5\u05ea \u05e1\u05dc \u05e2\u05d3\u05db\u05e0\u05d9\u05d5\u05ea</h1>
       <p class="muted">\u05d9\u05e9 \u05dc\u05d4\u05d6\u05d9\u05df \u05e0\u05ea\u05d5\u05e0\u05d9\u05dd \u05e2\u05d3\u05db\u05e0\u05d9\u05d9\u05dd \u05de\u05db\u05dc \u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9. \u05d0\u05d9\u05df \u05d7\u05d9\u05d1\u05d5\u05e8 \u05dc\u05d7\u05e9\u05d1\u05d5\u05df \u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9.</p>
+      {live_notice}
       <ul class="compact-list">{item_rows}</ul>
     </section>
     <form method="post" action="/orders/recommend" class="quote-form">
       <input type="hidden" name="actor" value="{escape(actor_id)}">
       <textarea name="items" hidden>{escape(items_raw)}</textarea>
-      {_retailer_fields("a", "\u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9 1")}
+      {_retailer_fields("a", "\u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9 1", prefill=prefill)}
       {_retailer_fields("b", "\u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9 2", required=False)}
       <div class="form-actions">
         <button type="submit">\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d0\u05e4\u05e9\u05e8\u05d5\u05d9\u05d5\u05ea</button>
@@ -229,22 +248,34 @@ def _offer_from_form(prefix: str, form: dict[str, str]) -> RetailerOffer | None:
     return RetailerOffer(retailer=retailer, delivery=delivery, pickup_points=pickup_points)
 
 
-def _retailer_fields(prefix: str, title: str, required: bool = True) -> str:
+def _retailer_fields(
+    prefix: str,
+    title: str,
+    required: bool = True,
+    prefill: RetailerQuotePrefill | None = None,
+) -> str:
     required_attr = "required" if required else ""
+    retailer_value = escape(prefill.retailer, quote=True) if prefill else ""
+    subtotal_value = str(prefill.subtotal) if prefill else ""
+    promotions_value = str(prefill.promotions) if prefill else "0"
+    weighted_checked = "checked" if prefill and prefill.weighted else ""
+    availability_checked = "" if prefill else "checked"
+    fee_required = "required" if prefill else ""
+    fee_value = "" if prefill else "0"
     return f"""
     <fieldset>
       <legend>{escape(title)}</legend>
       <div class="fields">
-        <label>\u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9 <input name="{prefix}_retailer" {required_attr}></label>
-        <label>\u05e1\u05db\u05d5\u05dd \u05d4\u05de\u05d5\u05e6\u05e8\u05d9\u05dd (\u05e9\u05f4\u05d7) <input name="{prefix}_subtotal" type="number" min="0" step="0.01" {required_attr}></label>
+        <label>\u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9 <input name="{prefix}_retailer" value="{retailer_value}" {required_attr}></label>
+        <label>\u05e1\u05db\u05d5\u05dd \u05d4\u05de\u05d5\u05e6\u05e8\u05d9\u05dd (\u05e9\u05f4\u05d7) <input name="{prefix}_subtotal" type="number" min="0" step="0.01" value="{subtotal_value}" {required_attr}></label>
         <label>\u05d4\u05e0\u05d7\u05d5\u05ea \u05e2\u05dc \u05de\u05d5\u05e6\u05e8\u05d9\u05dd <input name="{prefix}_discounts" type="number" min="0" step="0.01" value="0"></label>
-        <label>\u05de\u05d1\u05e6\u05e2\u05d9\u05dd <input name="{prefix}_promotions" type="number" min="0" step="0.01" value="0"></label>
-        <label>\u05d3\u05de\u05d9 \u05de\u05e9\u05dc\u05d5\u05d7 <input name="{prefix}_delivery_fee" type="number" min="0" step="0.01" value="0"></label>
-        <label>\u05d3\u05de\u05d9 \u05e9\u05d9\u05e8\u05d5\u05ea <input name="{prefix}_service_fee" type="number" min="0" step="0.01" value="0"></label>
+        <label>\u05de\u05d1\u05e6\u05e2\u05d9\u05dd <input name="{prefix}_promotions" type="number" min="0" step="0.01" value="{promotions_value}"></label>
+        <label>\u05d3\u05de\u05d9 \u05de\u05e9\u05dc\u05d5\u05d7 <input name="{prefix}_delivery_fee" type="number" min="0" step="0.01" value="{fee_value}" {fee_required}></label>
+        <label>\u05d3\u05de\u05d9 \u05e9\u05d9\u05e8\u05d5\u05ea <input name="{prefix}_service_fee" type="number" min="0" step="0.01" value="{fee_value}" {fee_required}></label>
       </div>
       <div class="checks">
-        <label><input type="checkbox" name="{prefix}_available" value="yes" checked> \u05db\u05dc \u05d4\u05e1\u05dc \u05d6\u05de\u05d9\u05df</label>
-        <label><input type="checkbox" name="{prefix}_weighted" value="yes"> \u05db\u05d5\u05dc\u05dc \u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05d1\u05de\u05e9\u05e7\u05dc</label>
+        <label><input type="checkbox" name="{prefix}_available" value="yes" {availability_checked}> \u05db\u05dc \u05d4\u05e1\u05dc \u05d6\u05de\u05d9\u05df</label>
+        <label><input type="checkbox" name="{prefix}_weighted" value="yes" {weighted_checked}> \u05db\u05d5\u05dc\u05dc \u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05d1\u05de\u05e9\u05e7\u05dc</label>
         <label><input type="checkbox" name="{prefix}_pickup" value="yes"> \u05d4\u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9 \u05de\u05e6\u05d9\u05e2 \u05d0\u05d9\u05e1\u05d5\u05e3</label>
       </div>
       <div class="fields pickup-fields">
