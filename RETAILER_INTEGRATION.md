@@ -76,3 +76,8 @@ class MyRetailerAdapter:
 - היעדר כתובת, סודות ופרטי תשלום ביומנים ובתגובות.
 
 לאחר קבלת פרטי ה־API הרשמיים של קמעונאי מסוים ניתן לממש ולרשום את המתאם שלו בלי לשנות את מנוע התקציב, האיסוף או ההמלצות.
+## Current Shufersal scope
+
+The Online store 413 adapter reads the official public price and promotion transparency feeds. Temporary signed download links are validated, kept in memory only, and never logged or rendered. The portal may keep a process-local estimate basket containing public product data and selected quantities; it does not create or modify a basket at Shufersal.
+
+Only simple public single-item discounted prices are applied automatically. Club, coupon, and quantity promotions are displayed as conditions and require confirmation at retailer checkout. Availability, delivery fees, pickup points, collection windows, and final checkout totals still require an authorized retailer API before they may be treated as live data.

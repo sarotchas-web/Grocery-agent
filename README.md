@@ -15,7 +15,8 @@ A local household grocery policy engine for comparing delivery and pickup option
 - Pickup eligibility checks for real pickup availability, Emek Hefer area, overlap with 16:30-18:30 Israel time, and full basket availability.
 - Recommendation logic comparing delivery first, then eligible pickup, then split baskets only when savings after all fees are at least 25 ILS.
 - Permission rules for Shay and Michal, including Michal's independent workflow permissions.
-- A read-only Shufersal Online price search using the official public transparency feed for store 413.
+- A read-only Shufersal Online price and public-promotion search using the official transparency feeds for store 413.
+- A process-local Shufersal basket estimate. It is not a retailer basket and is cleared when the portal restarts.
 
 ## Project layout
 
@@ -31,6 +32,8 @@ src/grocery_agent/
   recommendation.py      Delivery, pickup and split-basket recommendation rules
   retailer_adapter.py    Runtime adapter boundary for retailer data
   shufersal_adapter.py   Read-only official Shufersal Online price feed
+  shufersal_promotions.py Public promotion parsing and conservative price enrichment
+  shufersal_basket.py    Process-local basket estimates
   cli.py                 Local command-line admin workflow
   web_app.py             Local browser portal
   order_portal.py        Shopping list, quote comparison and cart preparation flow
@@ -107,6 +110,12 @@ http://127.0.0.1:8765
 ```
 
 Use the `Delivery profile` page as Shay to enter or update the real address locally. The portal does not prefill or display the full address after saving; it shows only the masked profile text and delivery profile ID.
+
+## Shufersal public catalog
+
+Open `Shufersal prices` in the Hebrew portal to search the official Online store 413 price and promotion feeds. Products can be added to a process-local estimate basket for Shay or Michal. The basket applies only simple public single-item prices; club, coupon, and quantity promotions are shown but are not automatically deducted. Delivery fees, service fees, item availability, personal promotions, and checkout totals must still be confirmed at the retailer.
+
+No retailer login, credential, payment detail, delivery address, or temporary signed feed URL is stored or rendered by this workflow.
 
 ## Starting an order
 

@@ -12,6 +12,7 @@ from grocery_agent.crypto import EnvMasterKeyCryptoProvider
 from grocery_agent.delivery_profile import DeliveryProfileStore, MASKED_DELIVERY_ADDRESS
 from grocery_agent.models import Role, User
 from grocery_agent.shufersal_adapter import ShufersalProduct
+from grocery_agent.shufersal_promotions import ShufersalProductOffer
 from grocery_agent.web_app import (
     render_home,
     render_profile_form,
@@ -99,9 +100,10 @@ class WebAppTests(unittest.TestCase):
             updated_at="2099-01-01T03:00:00",
         )
 
-        html = render_shufersal_search("michal", "\u05de\u05d5\u05e6\u05e8", (product,))
+        offer = ShufersalProductOffer(product, (), Decimal("12.30"))
+        html = render_shufersal_search("michal", "\u05de\u05d5\u05e6\u05e8", (offer,))
 
-        self.assertIn("\u05d7\u05d9\u05e4\u05d5\u05e9 \u05de\u05d7\u05d9\u05e8\u05d9 \u05de\u05d5\u05e6\u05e8\u05d9\u05dd", html)
+        self.assertIn("\u05d7\u05d9\u05e4\u05d5\u05e9 \u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05d5\u05de\u05d1\u05e6\u05e2\u05d9\u05dd", html)
         self.assertIn("\u20aa12.30", html)
         self.assertNotIn("blob.core.windows.net", html)
         self.assertNotIn("sig=", html)

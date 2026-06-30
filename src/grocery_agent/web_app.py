@@ -23,10 +23,11 @@ from grocery_agent.order_portal import (
     render_quote_form,
 )
 from grocery_agent.permissions import can, require_permission
-from grocery_agent.shufersal_adapter import (
-    ShufersalFeedError,
-    ShufersalProduct,
-    ShufersalPublicPriceClient,
+from grocery_agent.shufersal_adapter import ShufersalFeedError
+from grocery_agent.shufersal_basket import ShufersalBasket, ShufersalBasketStore
+from grocery_agent.shufersal_promotions import (
+    ShufersalProductOffer,
+    ShufersalPublicOfferClient,
 )
 
 
@@ -42,9 +43,10 @@ def run(host: str = "127.0.0.1", port: int = 8765, profile_path: Path = DEFAULT_
 
 def build_handler(
     profile_path: Path,
-    shufersal_client: ShufersalPublicPriceClient | None = None,
+    shufersal_client: ShufersalPublicOfferClient | None = None,
 ) -> type[BaseHTTPRequestHandler]:
-    price_client = shufersal_client or ShufersalPublicPriceClient()
+    offer_client = shufersal_client or ShufersalPublicOfferClient()
+    basket_store = ShufersalBasketStore()
 
     class GroceryAgentHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -59,6 +61,15 @@ def build_handler(
             if route.path == "/retailers/shufersal":
                 require_permission(actor, "submit_list")
                 self._send_html(_page("\u05de\u05d7\u05d9\u05e8\u05d9 \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc", render_shufersal_search(actor.id)))
+                return
+            if route.path == "/retailers/shufersal/basket":
+                require_permission(actor, "submit_list")
+                self._send_html(
+                    _page(
+                        "\u05e1\u05dc \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc",
+                        render_shufersal_basket(actor.id, basket_store.get(actor.id)),
+                    )
+                )
                 return
             if route.path == "/orders/new":
                 require_permission(actor, "submit_list")
@@ -76,8 +87,23 @@ def build_handler(
                 if route.path == "/retailers/shufersal":
                     require_permission(actor, "submit_list")
                     query = form.get("query", "").strip()
-                    products = price_client.search(query)
-                    html = _page("\u05de\u05d7\u05d9\u05e8\u05d9 \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc", render_shufersal_search(actor.id, query, products))
+                    offers = offer_client.search(query)
+                    html = _page("\u05de\u05d7\u05d9\u05e8\u05d9 \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc", render_shufersal_search(actor.id, query, offers))
+                elif route.path == "/retailers/shufersal/basket/add":
+                    require_permission(actor, "submit_list")
+                    offers = offer_client.search(form.get("item_code", ""), limit=1)
+                    if not offers:
+                        raise ValueError("\u05d4\u05de\u05d5\u05e6\u05e8 \u05dc\u05d0 \u05e0\u05de\u05e6\u05d0 \u05d1\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d4\u05e2\u05d3\u05db\u05e0\u05d9.")
+                    basket = basket_store.add(actor.id, offers[0], form.get("quantity", "1"))
+                    html = _page("\u05e1\u05dc \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc", render_shufersal_basket(actor.id, basket))
+                elif route.path == "/retailers/shufersal/basket/remove":
+                    require_permission(actor, "submit_list")
+                    basket = basket_store.remove(actor.id, form.get("item_code", ""))
+                    html = _page("\u05e1\u05dc \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc", render_shufersal_basket(actor.id, basket))
+                elif route.path == "/retailers/shufersal/basket/clear":
+                    require_permission(actor, "submit_list")
+                    basket = basket_store.clear(actor.id)
+                    html = _page("\u05e1\u05dc \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc", render_shufersal_basket(actor.id, basket))
                 elif route.path == "/admin/profile":
                     html = update_delivery_profile_from_form(actor, form, _store(profile_path))
                 elif route.path == "/orders/quotes":
@@ -179,22 +205,15 @@ def render_home(actor: User, store: DeliveryProfileStore) -> str:
 def render_shufersal_search(
     actor_id: str,
     query: str = "",
-    products: tuple[ShufersalProduct, ...] = (),
+    products: tuple[ShufersalProductOffer, ...] = (),
 ) -> str:
     if products:
-        rows = "".join(
-            f"<tr><td>{escape(product.name)}</td><td>{escape(product.item_code)}</td>"
-            f"<td>\u20aa{product.price_ils}</td>"
-            f"<td>{escape(product.unit_quantity or product.unit_of_measure)}</td>"
-            f"<td>{_yes_no(product.weighted)}</td>"
-            f"<td>{escape(product.updated_at)}</td></tr>"
-            for product in products
-        )
+        rows = "".join(_render_shufersal_offer_row(actor_id, offer) for offer in products)
         results = f"""
         <section class="table-band">
           <h2>\u05ea\u05d5\u05e6\u05d0\u05d5\u05ea ({len(products)})</h2>
           <div class="table-wrap"><table>
-            <thead><tr><th>\u05de\u05d5\u05e6\u05e8</th><th>\u05d1\u05e8\u05e7\u05d5\u05d3</th><th>\u05de\u05d7\u05d9\u05e8</th><th>\u05d9\u05d7\u05d9\u05d3\u05d4</th><th>\u05d1\u05de\u05e9\u05e7\u05dc</th><th>\u05e2\u05d5\u05d3\u05db\u05df</th></tr></thead>
+            <thead><tr><th>\u05de\u05d5\u05e6\u05e8</th><th>\u05d1\u05e8\u05e7\u05d5\u05d3</th><th>\u05de\u05d7\u05d9\u05e8 \u05e8\u05d2\u05d9\u05dc</th><th>\u05de\u05d7\u05d9\u05e8 \u05e6\u05d9\u05d1\u05d5\u05e8\u05d9 \u05de\u05d5\u05e2\u05e8\u05da</th><th>\u05de\u05d1\u05e6\u05e2\u05d9\u05dd</th><th>\u05d9\u05d7\u05d9\u05d3\u05d4</th><th>\u05dc\u05e1\u05dc</th></tr></thead>
             <tbody>{rows}</tbody>
           </table></div>
         </section>
@@ -204,11 +223,14 @@ def render_shufersal_search(
     else:
         results = ""
     return f"""
-    <section class="toolbar"><a href="/?actor={escape(actor_id)}">\u05d7\u05d6\u05e8\u05d4</a></section>
+    <section class="toolbar">
+      <a href="/?actor={escape(actor_id)}">\u05d7\u05d6\u05e8\u05d4</a>
+      <a href="/retailers/shufersal/basket?actor={escape(actor_id)}">\u05d4\u05e1\u05dc \u05e9\u05dc\u05d9</a>
+    </section>
     <section class="band">
       <p class="eyebrow">\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE</p>
-      <h1>\u05d7\u05d9\u05e4\u05d5\u05e9 \u05de\u05d7\u05d9\u05e8\u05d9 \u05de\u05d5\u05e6\u05e8\u05d9\u05dd</h1>
-      <p class="muted">\u05d4\u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05e0\u05e7\u05e8\u05d0\u05d9\u05dd \u05de\u05d0\u05ea\u05e8 \u05e9\u05e7\u05d9\u05e4\u05d5\u05ea \u05d4\u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05d4\u05e8\u05e9\u05de\u05d9. \u05d3\u05de\u05d9 \u05de\u05e9\u05dc\u05d5\u05d7, \u05d6\u05de\u05d9\u05e0\u05d5\u05ea \u05d5\u05de\u05d1\u05e6\u05e2\u05d9\u05dd \u05d0\u05d9\u05e9\u05d9\u05d9\u05dd \u05e0\u05d1\u05d3\u05e7\u05d9\u05dd \u05d1\u05e7\u05d5\u05e4\u05d4.</p>
+      <h1>\u05d7\u05d9\u05e4\u05d5\u05e9 \u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05d5\u05de\u05d1\u05e6\u05e2\u05d9\u05dd</h1>
+      <p class="muted">\u05d4\u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05d5\u05d4\u05de\u05d1\u05e6\u05e2\u05d9\u05dd \u05e0\u05e7\u05e8\u05d0\u05d9\u05dd \u05de\u05e7\u05d5\u05d1\u05e6\u05d9 \u05d4\u05e9\u05e7\u05d9\u05e4\u05d5\u05ea \u05d4\u05e8\u05e9\u05de\u05d9\u05d9\u05dd. \u05de\u05d1\u05e6\u05e2\u05d9 \u05de\u05d5\u05e2\u05d3\u05d5\u05df, \u05e7\u05d5\u05e4\u05d5\u05df \u05d0\u05d5 \u05db\u05de\u05d5\u05ea \u05de\u05d5\u05e6\u05d2\u05d9\u05dd \u05d0\u05da \u05d0\u05d9\u05e0\u05dd \u05de\u05d5\u05e4\u05d7\u05ea\u05d9\u05dd \u05d0\u05d5\u05d8\u05d5\u05de\u05d8\u05d9\u05ea. \u05d6\u05de\u05d9\u05e0\u05d5\u05ea, \u05d3\u05de\u05d9 \u05de\u05e9\u05dc\u05d5\u05d7 \u05d5\u05de\u05d7\u05d9\u05e8 \u05e1\u05d5\u05e4\u05d9 \u05de\u05d0\u05d5\u05e9\u05e8\u05d9\u05dd \u05d1\u05e7\u05d5\u05e4\u05d4.</p>
     </section>
     <form method="post" action="/retailers/shufersal" class="form">
       <input type="hidden" name="actor" value="{escape(actor_id)}">
@@ -220,8 +242,92 @@ def render_shufersal_search(
     {results}
     """
 
-def _yes_no(value: bool) -> str:
-    return "\u05db\u05df" if value else "\u05dc\u05d0"
+
+def _render_shufersal_offer_row(actor_id: str, offer: ShufersalProductOffer) -> str:
+    product = offer.product
+    estimated = f"\u20aa{offer.effective_price_ils}"
+    if offer.effective_price_ils == product.price_ils:
+        estimated = "\u2014"
+    return (
+        f"<tr><td>{escape(product.name)}</td><td>{escape(product.item_code)}</td>"
+        f"<td>\u20aa{product.price_ils}</td><td>{estimated}</td>"
+        f"<td>{_promotion_summary(offer)}</td>"
+        f"<td>{escape(product.unit_quantity or product.unit_of_measure)}"
+        f"{' (\u05d1\u05de\u05e9\u05e7\u05dc)' if product.weighted else ''}</td>"
+        f'<td><form method="post" action="/retailers/shufersal/basket/add" class="inline-form">'
+        f'<input type="hidden" name="actor" value="{escape(actor_id)}">'
+        f'<input type="hidden" name="item_code" value="{escape(product.item_code)}">'
+        f'<input type="number" name="quantity" value="1" min="0.01" max="100" step="0.01" aria-label="\u05db\u05de\u05d5\u05ea">'
+        f'<button type="submit">\u05d4\u05d5\u05e1\u05e4\u05d4</button></form></td></tr>'
+    )
+
+
+def _promotion_summary(offer: ShufersalProductOffer) -> str:
+    if not offer.promotions:
+        return "\u05d0\u05d9\u05df \u05de\u05d1\u05e6\u05e2 \u05e6\u05d9\u05d1\u05d5\u05e8\u05d9"
+    labels: list[str] = []
+    for promotion in offer.promotions[:2]:
+        restrictions: list[str] = []
+        item = next(
+            (item for item in promotion.items if item.item_code == offer.product.item_code),
+            None,
+        )
+        if promotion.club_only:
+            restrictions.append("\u05de\u05d5\u05e2\u05d3\u05d5\u05df")
+        if promotion.coupon_required:
+            restrictions.append("\u05e7\u05d5\u05e4\u05d5\u05df")
+        if item is not None and item.minimum_quantity > 1:
+            restrictions.append(f"\u05de\u05d9\u05e0\u05d9\u05de\u05d5\u05dd {item.minimum_quantity:g}")
+        suffix = f" ({', '.join(restrictions)})" if restrictions else ""
+        labels.append(escape(promotion.description or "\u05de\u05d1\u05e6\u05e2") + escape(suffix))
+    return "<br>".join(labels)
+
+
+def render_shufersal_basket(actor_id: str, basket: ShufersalBasket) -> str:
+    toolbar = f"""
+    <section class="toolbar">
+      <a href="/retailers/shufersal?actor={escape(actor_id)}">\u05d4\u05de\u05e9\u05da \u05d7\u05d9\u05e4\u05d5\u05e9</a>
+      <a href="/orders/new?actor={escape(actor_id)}">\u05de\u05e2\u05d1\u05e8 \u05dc\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d4\u05d6\u05de\u05e0\u05d4</a>
+    </section>
+    """
+    if not basket.lines:
+        return toolbar + '<section class="band"><h1>\u05e1\u05dc \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc</h1><p>\u05d4\u05e1\u05dc \u05e2\u05d3\u05d9\u05d9\u05df \u05e8\u05d9\u05e7.</p></section>'
+
+    rows = "".join(
+        f"<tr><td>{escape(line.offer.product.name)}</td><td>{line.quantity:g}</td>"
+        f"<td>\u20aa{line.offer.product.price_ils}</td><td>\u20aa{line.estimated_total_ils}</td>"
+        f'<td><form method="post" action="/retailers/shufersal/basket/remove" class="inline-form">'
+        f'<input type="hidden" name="actor" value="{escape(actor_id)}">'
+        f'<input type="hidden" name="item_code" value="{escape(line.offer.product.item_code)}">'
+        f'<button type="submit">\u05d4\u05e1\u05e8\u05d4</button></form></td></tr>'
+        for line in basket.lines
+    )
+    weight_notice = (
+        '<p class="warning">\u05d4\u05e1\u05db\u05d5\u05dd \u05db\u05d5\u05dc\u05dc \u05d4\u05e2\u05e8\u05db\u05ea \u05de\u05e9\u05e7\u05dc; \u05d4\u05d7\u05d9\u05d5\u05d1 \u05d4\u05e1\u05d5\u05e4\u05d9 \u05e2\u05e9\u05d5\u05d9 \u05dc\u05d4\u05e9\u05ea\u05e0\u05d5\u05ea \u05dc\u05e4\u05d9 \u05d4\u05de\u05e9\u05e7\u05dc \u05d1\u05e4\u05d5\u05e2\u05dc.</p>'
+        if basket.has_weighted_items
+        else ""
+    )
+    return toolbar + f"""
+    <section class="band">
+      <h1>\u05e1\u05dc \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc \u05de\u05e7\u05d5\u05de\u05d9</h1>
+      <p class="muted">\u05d4\u05e1\u05dc \u05e0\u05e9\u05de\u05e8 \u05e8\u05e7 \u05d1\u05d6\u05de\u05df \u05e9\u05d4\u05e4\u05d5\u05e8\u05d8\u05dc \u05e4\u05d5\u05e2\u05dc. \u05d4\u05d5\u05d0 \u05d0\u05d9\u05e0\u05d5 \u05e1\u05dc \u05d1\u05d0\u05ea\u05e8 \u05d4\u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9.</p>
+      {weight_notice}
+    </section>
+    <section class="table-band"><div class="table-wrap"><table>
+      <thead><tr><th>\u05de\u05d5\u05e6\u05e8</th><th>\u05db\u05de\u05d5\u05ea</th><th>\u05de\u05d7\u05d9\u05e8 \u05e8\u05d2\u05d9\u05dc</th><th>\u05e1\u05db\u05d5\u05dd \u05de\u05d5\u05e2\u05e8\u05da</th><th></th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table></div></section>
+    <section class="band">
+      <dl><dt>\u05e1\u05db\u05d5\u05dd \u05e8\u05d2\u05d9\u05dc</dt><dd>\u20aa{basket.regular_total_ils}</dd>
+      <dt>\u05d7\u05d9\u05e1\u05db\u05d5\u05df \u05e6\u05d9\u05d1\u05d5\u05e8\u05d9 \u05e9\u05d7\u05d5\u05e9\u05d1</dt><dd>\u20aa{basket.public_savings_ils}</dd>
+      <dt>\u05e1\u05db\u05d5\u05dd \u05de\u05d5\u05e2\u05e8\u05da</dt><dd><strong>\u20aa{basket.estimated_total_ils}</strong></dd></dl>
+      <p class="muted">\u05d3\u05de\u05d9 \u05de\u05e9\u05dc\u05d5\u05d7, \u05d3\u05de\u05d9 \u05e9\u05d9\u05e8\u05d5\u05ea, \u05d6\u05de\u05d9\u05e0\u05d5\u05ea \u05d5\u05de\u05d1\u05e6\u05e2\u05d9\u05dd \u05d0\u05d9\u05e9\u05d9\u05d9\u05dd \u05e0\u05d1\u05d3\u05e7\u05d9\u05dd \u05e8\u05e7 \u05d1\u05e7\u05d5\u05e4\u05d4.</p>
+      <form method="post" action="/retailers/shufersal/basket/clear">
+        <input type="hidden" name="actor" value="{escape(actor_id)}">
+        <button type="submit" class="secondary">\u05e0\u05d9\u05e7\u05d5\u05d9 \u05d4\u05e1\u05dc</button>
+      </form>
+    </section>
+    """
 
 
 def _actor_display_name(actor: User) -> str:
@@ -421,6 +527,10 @@ def _page(title: str, body: str) -> str:
     .checks label, .ack {{ display: flex; grid-template-columns: none; align-items: center; gap: 8px; }}
     .checks input, .ack input {{ min-height: auto; width: 18px; height: 18px; }}
     .form-actions {{ display: flex; justify-content: flex-end; }}
+    .inline-form {{ display: flex; align-items: center; gap: 6px; }}
+    .inline-form input[type="number"] {{ width: 76px; min-height: 36px; }}
+    .inline-form button {{ white-space: nowrap; }}
+    .secondary {{ background: white; color: var(--accent); }}
     .table-band {{ padding: 20px; border-bottom: 1px solid var(--line); }}
     .table-wrap {{ overflow-x: auto; }}
     table {{ width: 100%; border-collapse: collapse; min-width: 760px; }}
