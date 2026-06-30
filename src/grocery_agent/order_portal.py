@@ -73,7 +73,7 @@ def render_new_order_form(actor_id: str) -> str:
       <label>\u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05dc\u05e7\u05e0\u05d9\u05d9\u05d4
         <textarea name="items" rows="10" required placeholder="\u05d7\u05dc\u05d1&#10;\u05dc\u05d7\u05dd&#10;\u05ea\u05e4\u05d5\u05d7\u05d9\u05dd"></textarea>
       </label>
-      <button type="submit">\u05d4\u05de\u05e9\u05da \u05dc\u05d4\u05e6\u05e2\u05d5\u05ea \u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9\u05dd</button>
+      <button type="submit">\u05d7\u05d9\u05e4\u05d5\u05e9 \u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05d5\u05d4\u05de\u05e9\u05da \u05dc\u05d4\u05e9\u05d5\u05d5\u05d0\u05d4</button>
     </form>
     """
 

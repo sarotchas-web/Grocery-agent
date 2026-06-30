@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import unittest
+import urllib.parse
+import urllib.request
 from decimal import Decimal
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -17,8 +21,10 @@ from grocery_agent.shufersal_promotions import (
     ShufersalProductOffer,
 )
 from grocery_agent.web_app import (
+    build_handler,
     render_home,
     render_profile_form,
+    render_shufersal_match_form,
     render_shufersal_search,
     render_shufersal_status,
     update_delivery_profile_from_form,
@@ -107,6 +113,59 @@ class WebAppTests(unittest.TestCase):
         self.assertNotIn("blob.core.windows.net", html)
         self.assertNotIn("sig=", html)
 
+    def test_new_order_match_page_shows_live_options_and_manual_fallback(self) -> None:
+        product = _synthetic_product()
+        offer = ShufersalProductOffer(product, (), Decimal("12.30"))
+
+        html = render_shufersal_match_form(
+            "michal",
+            "<synthetic milk>",
+            (("<synthetic milk>", (offer,)),),
+        )
+
+        self.assertIn('action="/orders/shufersal-match"', html)
+        self.assertIn('name="selection_0" value="7290000000001"', html)
+        self.assertIn("\u20aa12.30", html)
+        self.assertIn('action="/orders/quotes/manual"', html)
+        self.assertNotIn("<synthetic milk>", html)
+        self.assertIn("&lt;synthetic milk&gt;", html)
+        self.assertNotIn("sig=", html)
+
+    def test_new_order_http_flow_prefills_selected_live_product(self) -> None:
+        product = _synthetic_product()
+        offer = ShufersalProductOffer(product, (), Decimal("12.30"))
+
+        class FakeOfferClient:
+            def search(self, query: str, limit: int = 20):
+                if query in ("\u05d7\u05dc\u05d1", product.item_code):
+                    return (offer,)
+                return ()
+
+        handler = build_handler(self.profile_path, shufersal_client=FakeOfferClient())
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        try:
+            match_response = _post_form(
+                base + "/orders/quotes",
+                {"actor": "michal", "items": "\u05d7\u05dc\u05d1"},
+            )
+            self.assertIn('name="selection_0"', match_response)
+            quote_response = _post_form(
+                base + "/orders/shufersal-match",
+                {
+                    "actor": "michal",
+                    "items": "\u05d7\u05dc\u05d1",
+                    "selection_0": product.item_code,
+                },
+            )
+            self.assertIn('name="a_retailer" value="\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE"', quote_response)
+            self.assertIn('name="a_subtotal" type="number" min="0" step="0.01" value="12.30"', quote_response)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
     def test_shufersal_search_renders_public_price_only(self) -> None:
         product = ShufersalProduct(
             item_code="7290000000001",
@@ -127,6 +186,30 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("\u20aa12.30", html)
         self.assertNotIn("blob.core.windows.net", html)
         self.assertNotIn("sig=", html)
+
+def _synthetic_product() -> ShufersalProduct:
+    return ShufersalProduct(
+        item_code="7290000000001",
+        name="\u05de\u05d5\u05e6\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4",
+        price_ils=Decimal("12.30"),
+        unit_quantity="\u05d9\u05d7\u05d9\u05d3\u05d4",
+        quantity=Decimal("1"),
+        unit_of_measure="\u05d9\u05d7\u05d9\u05d3\u05d4",
+        unit_price_ils=Decimal("12.30"),
+        weighted=False,
+        updated_at="2099-01-01T03:00:00",
+    )
+
+
+def _post_form(url: str, form: dict[str, str]) -> str:
+    request = urllib.request.Request(
+        url,
+        data=urllib.parse.urlencode(form).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=3) as response:
+        return response.read().decode("utf-8")
 
 if __name__ == "__main__":
     unittest.main()

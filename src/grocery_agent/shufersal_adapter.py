@@ -92,7 +92,11 @@ class ShufersalPublicPriceClient:
         candidates: list[tuple[tuple[int, int, int, str], ShufersalProduct]] = []
         for product in products:
             normalized_name = _normalize(product.name)
-            if not all(token in normalized_name for token in query_tokens):
+            name_tokens = normalized_name.split()
+            if not all(
+                any(_token_matches(token, name_token) for name_token in name_tokens)
+                for token in query_tokens
+            ):
                 continue
             score = (
                 0 if normalized_name == normalized_query else 1,
@@ -225,6 +229,12 @@ def _decompress_limited(compressed: bytes) -> bytes:
         )
     return payload
 
+
+def _token_matches(query_token: str, name_token: str) -> bool:
+    if name_token == query_token:
+        return True
+    suffix = name_token[len(query_token):] if name_token.startswith(query_token) else ""
+    return bool(suffix) and suffix[0].isdigit()
 
 def _normalize(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()

@@ -12,6 +12,7 @@ from grocery_agent.shufersal_adapter import (
     ShufersalFeedError,
     ShufersalPublicPriceClient,
     _extract_price_feed_url,
+    _token_matches,
     parse_price_catalog,
 )
 
@@ -81,6 +82,13 @@ class ShufersalAdapterTests(unittest.TestCase):
         )
         self.assertEqual(calls.count(SHUFERSAL_INDEX_URL), 1)
 
+    def test_search_token_does_not_match_a_longer_hebrew_word(self) -> None:
+        milk = "\u05d7\u05dc\u05d1"
+        halva = "\u05d7\u05dc\u05d1\u05d4"
+
+        self.assertTrue(_token_matches(milk, milk))
+        self.assertTrue(_token_matches(milk, milk + "3"))
+        self.assertFalse(_token_matches(milk, halva))
     def test_rejects_unexpected_download_host(self) -> None:
         malicious = (
             '<a href="https://example.invalid/pricefull/'

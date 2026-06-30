@@ -18,6 +18,7 @@ from grocery_agent.models import Role, User, money
 from grocery_agent.order_portal import (
     RetailerQuotePrefill,
     compare_order_form,
+    parse_shopping_list,
     render_approval,
     render_comparison,
     render_new_order_form,
@@ -79,16 +80,10 @@ def build_handler(
                 if not basket.lines:
                     self._send_html(render_error("\u05d9\u05e9 \u05dc\u05d4\u05d5\u05e1\u05d9\u05e3 \u05dc\u05e4\u05d7\u05d5\u05ea \u05de\u05d5\u05e6\u05e8 \u05d0\u05d7\u05d3 \u05dc\u05e1\u05dc."), status=400)
                     return
-                prefill = RetailerQuotePrefill(
-                    retailer="\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE",
-                    subtotal=basket.regular_total_ils,
-                    promotions=basket.public_savings_ils,
-                    weighted=basket.has_weighted_items,
-                )
                 self._send_html(
                     _page(
                         "\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d4\u05d6\u05de\u05e0\u05d4",
-                        render_quote_form(actor.id, basket.shopping_list_text, prefill=prefill),
+                        render_shufersal_basket_quote(actor.id, basket),
                     )
                 )
                 return
@@ -143,7 +138,43 @@ def build_handler(
                     html = update_delivery_profile_from_form(actor, form, _store(profile_path))
                 elif route.path == "/orders/quotes":
                     require_permission(actor, "submit_list")
-                    html = _page("\u05d4\u05e6\u05e2\u05d5\u05ea \u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9\u05dd", render_quote_form(actor.id, form.get("items", "")))
+                    items_raw = form.get("items", "")
+                    items = parse_shopping_list(items_raw)
+                    matches = tuple(
+                        (item, offer_client.search(item, limit=5))
+                        for item in items
+                    )
+                    html = _page(
+                        "\u05d4\u05ea\u05d0\u05de\u05ea \u05de\u05d5\u05e6\u05e8\u05d9\u05dd",
+                        render_shufersal_match_form(actor.id, items_raw, matches),
+                    )
+                elif route.path == "/orders/quotes/manual":
+                    require_permission(actor, "submit_list")
+                    html = _page(
+                        "\u05d4\u05e6\u05e2\u05d5\u05ea \u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9\u05dd",
+                        render_quote_form(actor.id, form.get("items", "")),
+                    )
+                elif route.path == "/orders/shufersal-match":
+                    require_permission(actor, "resolve_product_exceptions")
+                    items_raw = form.get("items", "")
+                    items = parse_shopping_list(items_raw)
+                    selected_offers: list[ShufersalProductOffer] = []
+                    for index, item in enumerate(items):
+                        item_code = form.get(f"selection_{index}", "").strip()
+                        if not item_code:
+                            raise ValueError(f"\u05d9\u05e9 \u05dc\u05d1\u05d7\u05d5\u05e8 \u05de\u05d5\u05e6\u05e8 \u05e2\u05d1\u05d5\u05e8 {item}.")
+                        offers = offer_client.search(item_code, limit=1)
+                        if not offers or offers[0].product.item_code != item_code:
+                            raise ValueError("\u05d4\u05de\u05d5\u05e6\u05e8 \u05e9\u05e0\u05d1\u05d7\u05e8 \u05d0\u05d9\u05e0\u05d5 \u05e2\u05d5\u05d3 \u05d1\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d4\u05e2\u05d3\u05db\u05e0\u05d9.")
+                        selected_offers.append(offers[0])
+                    basket_store.clear(actor.id)
+                    basket = ShufersalBasket()
+                    for offer in selected_offers:
+                        basket = basket_store.add(actor.id, offer, "1")
+                    html = _page(
+                        "\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d4\u05d6\u05de\u05e0\u05d4",
+                        render_shufersal_basket_quote(actor.id, basket),
+                    )
                 elif route.path == "/orders/recommend":
                     require_permission(actor, "choose_fulfillment")
                     html = _page("\u05d4\u05de\u05dc\u05e6\u05d4 \u05dc\u05d4\u05d6\u05de\u05e0\u05d4", render_comparison(actor.id, compare_order_form(form)))
@@ -318,6 +349,82 @@ def _promotion_summary(offer: ShufersalProductOffer) -> str:
         labels.append(escape(promotion.description or "\u05de\u05d1\u05e6\u05e2") + escape(suffix))
     return "<br>".join(labels)
 
+
+def render_shufersal_match_form(
+    actor_id: str,
+    items_raw: str,
+    matches: tuple[tuple[str, tuple[ShufersalProductOffer, ...]], ...],
+) -> str:
+    sections: list[str] = []
+    all_resolved = True
+    for index, (requested_item, offers) in enumerate(matches):
+        if offers:
+            options = "".join(
+                _render_match_option(index, offer)
+                for offer in offers
+            )
+        else:
+            all_resolved = False
+            options = '<p class="warning">\u05dc\u05d0 \u05e0\u05de\u05e6\u05d0\u05d4 \u05d4\u05ea\u05d0\u05de\u05d4 \u05d1\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d4\u05e6\u05d9\u05d1\u05d5\u05e8\u05d9.</p>'
+        sections.append(
+            f'<fieldset class="match-group"><legend>{escape(requested_item)}</legend>'
+            f'<div class="match-options">{options}</div></fieldset>'
+        )
+
+    disabled = "" if all_resolved and matches else "disabled"
+    return f"""
+    <section class="toolbar">
+      <a href="/orders/new?actor={escape(actor_id)}">\u05d7\u05d6\u05e8\u05d4 \u05dc\u05e8\u05e9\u05d9\u05de\u05d4</a>
+      <a href="/retailers/shufersal/status?actor={escape(actor_id)}">\u05de\u05e6\u05d1 \u05d4\u05d7\u05d9\u05d1\u05d5\u05e8</a>
+    </section>
+    <section class="band">
+      <p class="eyebrow">\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE</p>
+      <h1>\u05d1\u05d7\u05d9\u05e8\u05ea \u05d4\u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05d4\u05de\u05d3\u05d5\u05d9\u05e7\u05d9\u05dd</h1>
+      <p class="muted">\u05d4\u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05d5\u05d4\u05de\u05d1\u05e6\u05e2\u05d9\u05dd \u05e0\u05e7\u05e8\u05d0\u05d5 \u05db\u05e2\u05ea \u05de\u05d4\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d4\u05e6\u05d9\u05d1\u05d5\u05e8\u05d9. \u05d9\u05e9 \u05dc\u05d1\u05d7\u05d5\u05e8 \u05d0\u05e4\u05e9\u05e8\u05d5\u05ea \u05d0\u05d7\u05ea \u05dc\u05db\u05dc \u05e9\u05d5\u05e8\u05d4; \u05d4\u05de\u05e2\u05e8\u05db\u05ea \u05dc\u05d0 \u05ea\u05e0\u05d7\u05e9 \u05d0\u05d9\u05d6\u05d4 \u05de\u05d5\u05e6\u05e8 \u05e8\u05e6\u05d9\u05ea.</p>
+    </section>
+    <form method="post" action="/orders/shufersal-match" class="quote-form">
+      <input type="hidden" name="actor" value="{escape(actor_id)}">
+      <textarea name="items" hidden>{escape(items_raw)}</textarea>
+      {''.join(sections)}
+      <div class="form-actions"><button type="submit" {disabled}>\u05d4\u05de\u05e9\u05da \u05e2\u05dd \u05d4\u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05e9\u05e0\u05d1\u05d7\u05e8\u05d5</button></div>
+    </form>
+    <form method="post" action="/orders/quotes/manual" class="form manual-fallback">
+      <input type="hidden" name="actor" value="{escape(actor_id)}">
+      <textarea name="items" hidden>{escape(items_raw)}</textarea>
+      <button type="submit" class="secondary">\u05de\u05e2\u05d1\u05e8 \u05dc\u05d4\u05e9\u05d5\u05d5\u05d0\u05d4 \u05d9\u05d3\u05e0\u05d9\u05ea</button>
+    </form>
+    """
+
+
+def _render_match_option(index: int, offer: ShufersalProductOffer) -> str:
+    product = offer.product
+    price = f"\u20aa{product.price_ils}"
+    if offer.effective_price_ils < product.price_ils:
+        price += f" | \u05de\u05d7\u05d9\u05e8 \u05e6\u05d9\u05d1\u05d5\u05e8\u05d9 \u05de\u05d5\u05e2\u05e8\u05da \u20aa{offer.effective_price_ils}"
+    unit = escape(product.unit_quantity or product.unit_of_measure)
+    return f"""
+    <label class="match-option">
+      <input type="radio" name="selection_{index}" value="{escape(product.item_code)}" required>
+      <span><strong>{escape(product.name)}</strong><br>
+      <small>{price} | {unit} | {_promotion_summary(offer)}</small></span>
+    </label>
+    """
+
+
+def render_shufersal_basket_quote(actor_id: str, basket: ShufersalBasket) -> str:
+    if not basket.lines:
+        raise ValueError("\u05d9\u05e9 \u05dc\u05d1\u05d7\u05d5\u05e8 \u05dc\u05e4\u05d7\u05d5\u05ea \u05de\u05d5\u05e6\u05e8 \u05d0\u05d7\u05d3.")
+    prefill = RetailerQuotePrefill(
+        retailer="\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE",
+        subtotal=basket.regular_total_ils,
+        promotions=basket.public_savings_ils,
+        weighted=basket.has_weighted_items,
+    )
+    return render_quote_form(
+        actor_id,
+        basket.shopping_list_text,
+        prefill=prefill,
+    )
 
 def render_shufersal_status(actor_id: str, status: ShufersalConnectionStatus) -> str:
     updated = escape(status.latest_price_update or "\u05dc\u05d0 \u05e0\u05de\u05e1\u05e8")
@@ -588,6 +695,22 @@ def _page(title: str, body: str) -> str:
     .inline-form input[type="number"] {{ width: 76px; min-height: 36px; }}
     .inline-form button {{ white-space: nowrap; }}
     .secondary {{ background: white; color: var(--accent); }}
+    .match-options {{ display: grid; gap: 8px; }}
+    .match-option {{
+      display: flex;
+      grid-template-columns: none;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-weight: 400;
+      cursor: pointer;
+    }}
+    .match-option:has(input:checked) {{ border-color: var(--accent); background: #eef8f3; }}
+    .match-option input {{ width: 18px; height: 18px; min-height: auto; margin-top: 2px; }}
+    .match-option small {{ color: var(--muted); white-space: normal; }}
+    .manual-fallback {{ padding-top: 0; }}
     .connection-note {{
       padding: 12px;
       border-right: 4px solid var(--accent);
