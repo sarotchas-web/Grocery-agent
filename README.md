@@ -121,12 +121,12 @@ No retailer login, credential, payment detail, delivery address, or temporary si
 
 1. Start the portal and open `http://127.0.0.1:8765`.
 2. Select `הזמנה חדשה`, enter one search phrase per line such as `חלב`, and continue.
-3. Select the exact live Shufersal product for every line. The app does not guess between similar products.
-4. The Shufersal retailer name, public item subtotal, public promotion savings, and product list are then prefilled.
-5. Confirm whole-basket availability and enter the current delivery and service fees from retailer checkout before comparing.
-6. Use `מחירי שופרסל` and `מצב החיבור` to inspect the public catalog directly. Manual retailer comparison remains available when an item has no suitable public match.
+3. Select the exact live Shufersal product and quantity for every line. The app does not guess between similar products.
+4. Review one simple Shufersal table containing product name, quantity, public unit price, line total, and the estimated product total.
+5. Choose a delivery or pickup preference and approve local cart preparation. Pickup remains a preference until Shufersal confirms a real point and window.
+6. Open Shufersal Online from the prepared-cart page to complete availability, fees, checkout, and payment.
 
-This is a live read-only public-data connection. It does not sign in, transmit the delivery profile, create a retailer-side basket, reserve stock, select a real pickup window, place an order, or transmit payment data. Those actions require an authorized retailer API and separate user confirmation.
+This is a live read-only public-data connection. It does not sign in, transmit the delivery profile, create or transfer a retailer-side basket, reserve stock, select a real pickup window, place an order, or transmit payment data. The final button opens Shufersal Online without putting product, address, credential, or payment data in the URL. Automated checkout requires an authorized retailer API and separate user confirmation.
 
 ## Starting an order
 

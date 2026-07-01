@@ -12,10 +12,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from grocery_agent.budget import BUDGET_ACK_TEXT_HE
 from grocery_agent.crypto import EnvMasterKeyCryptoProvider
 from grocery_agent.delivery_profile import DeliveryProfileStore, MASKED_DELIVERY_ADDRESS
 from grocery_agent.models import Role, User
 from grocery_agent.shufersal_adapter import ShufersalProduct
+from grocery_agent.shufersal_basket import ShufersalBasketStore
 from grocery_agent.shufersal_promotions import (
     ShufersalConnectionStatus,
     ShufersalProductOffer,
@@ -25,6 +27,8 @@ from grocery_agent.web_app import (
     render_home,
     render_profile_form,
     render_shufersal_match_form,
+    render_shufersal_order_review,
+    render_shufersal_prepared_order,
     render_shufersal_search,
     render_shufersal_status,
     update_delivery_profile_from_form,
@@ -113,7 +117,7 @@ class WebAppTests(unittest.TestCase):
         self.assertNotIn("blob.core.windows.net", html)
         self.assertNotIn("sig=", html)
 
-    def test_new_order_match_page_shows_live_options_and_manual_fallback(self) -> None:
+    def test_new_order_match_page_shows_live_options_and_quantity(self) -> None:
         product = _synthetic_product()
         offer = ShufersalProductOffer(product, (), Decimal("12.30"))
 
@@ -126,7 +130,8 @@ class WebAppTests(unittest.TestCase):
         self.assertIn('action="/orders/shufersal-match"', html)
         self.assertIn('name="selection_0" value="7290000000001"', html)
         self.assertIn("\u20aa12.30", html)
-        self.assertIn('action="/orders/quotes/manual"', html)
+        self.assertIn('name="quantity_0" value="1"', html)
+        self.assertNotIn('/orders/quotes/manual', html)
         self.assertNotIn("<synthetic milk>", html)
         self.assertIn("&lt;synthetic milk&gt;", html)
         self.assertNotIn("sig=", html)
@@ -158,14 +163,61 @@ class WebAppTests(unittest.TestCase):
                     "actor": "michal",
                     "items": "\u05d7\u05dc\u05d1",
                     "selection_0": product.item_code,
+                    "quantity_0": "2",
                 },
             )
-            self.assertIn('name="a_retailer" value="\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE"', quote_response)
-            self.assertIn('name="a_subtotal" type="number" min="0" step="0.01" value="12.30"', quote_response)
+            self.assertIn("\u05e9\u05dd \u05d4\u05de\u05d5\u05e6\u05e8", quote_response)
+            self.assertIn("\u05de\u05d7\u05d9\u05e8 \u05dc\u05de\u05d5\u05e6\u05e8", quote_response)
+            self.assertIn("\u20aa24.60", quote_response)
+            self.assertIn('name="fulfillment_mode"', quote_response)
+            self.assertNotIn('name="a_retailer"', quote_response)
+            prepared_response = _post_form(
+                base + "/orders/shufersal-prepare",
+                {"actor": "michal", "fulfillment_mode": "DELIVERY"},
+            )
+            self.assertIn("https://www.shufersal.co.il/online/he", prepared_response)
+            self.assertIn("\u20aa24.60", prepared_response)
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=3)
+    def test_simple_order_review_has_only_requested_columns_and_fulfillment(self) -> None:
+        offer = ShufersalProductOffer(_synthetic_product(), (), Decimal("12.30"))
+        basket = ShufersalBasketStore().add("michal", offer, "3")
+
+        html = render_shufersal_order_review("michal", basket)
+
+        for label in ("\u05e9\u05dd \u05d4\u05de\u05d5\u05e6\u05e8", "\u05db\u05de\u05d5\u05ea", "\u05de\u05d7\u05d9\u05e8 \u05dc\u05de\u05d5\u05e6\u05e8", "\u05de\u05d7\u05d9\u05e8 \u05e1\u05d4\u05f4\u05db"):
+            self.assertIn(label, html)
+        self.assertIn("\u20aa36.90", html)
+        self.assertIn('name="fulfillment_mode"', html)
+        self.assertIn('value="DELIVERY"', html)
+        self.assertIn('value="PICKUP"', html)
+        self.assertNotIn('name="a_retailer"', html)
+        self.assertNotIn("\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9\u05dd", html)
+
+    def test_simple_order_review_budget_boundary(self) -> None:
+        at_limit_offer = ShufersalProductOffer(
+            _synthetic_product(price="800.00"), (), Decimal("800.00")
+        )
+        over_limit_offer = ShufersalProductOffer(
+            _synthetic_product(price="800.01"), (), Decimal("800.01")
+        )
+        at_limit = ShufersalBasketStore().add("michal", at_limit_offer, "1")
+        over_limit = ShufersalBasketStore().add("michal", over_limit_offer, "1")
+
+        self.assertNotIn(BUDGET_ACK_TEXT_HE, render_shufersal_order_review("michal", at_limit))
+        self.assertIn(BUDGET_ACK_TEXT_HE, render_shufersal_order_review("michal", over_limit))
+
+    def test_prepared_order_does_not_claim_purchase_was_placed(self) -> None:
+        offer = ShufersalProductOffer(_synthetic_product(), (), Decimal("12.30"))
+        basket = ShufersalBasketStore().add("michal", offer, "1")
+
+        html = render_shufersal_prepared_order("michal", basket, "PICKUP")
+
+        self.assertIn("https://www.shufersal.co.il/online/he", html)
+        self.assertIn("\u05d0\u05d9\u05e1\u05d5\u05e3", html)
+        self.assertIn("\u05dc\u05d0 \u05d1\u05d5\u05e6\u05e2\u05d5", html)
     def test_shufersal_search_renders_public_price_only(self) -> None:
         product = ShufersalProduct(
             item_code="7290000000001",
@@ -187,15 +239,15 @@ class WebAppTests(unittest.TestCase):
         self.assertNotIn("blob.core.windows.net", html)
         self.assertNotIn("sig=", html)
 
-def _synthetic_product() -> ShufersalProduct:
+def _synthetic_product(price: str = "12.30") -> ShufersalProduct:
     return ShufersalProduct(
         item_code="7290000000001",
         name="\u05de\u05d5\u05e6\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4",
-        price_ils=Decimal("12.30"),
+        price_ils=Decimal(price),
         unit_quantity="\u05d9\u05d7\u05d9\u05d3\u05d4",
         quantity=Decimal("1"),
         unit_of_measure="\u05d9\u05d7\u05d9\u05d3\u05d4",
-        unit_price_ils=Decimal("12.30"),
+        unit_price_ils=Decimal(price),
         weighted=False,
         updated_at="2099-01-01T03:00:00",
     )

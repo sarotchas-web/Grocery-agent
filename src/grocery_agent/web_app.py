@@ -16,7 +16,6 @@ from grocery_agent.delivery_profile import (
 )
 from grocery_agent.models import Role, User, money
 from grocery_agent.order_portal import (
-    RetailerQuotePrefill,
     compare_order_form,
     parse_shopping_list,
     render_approval,
@@ -35,6 +34,7 @@ from grocery_agent.shufersal_promotions import (
 
 
 DEFAULT_PROFILE_PATH = Path(".local") / "delivery-profile.enc"
+SHUFERSAL_ONLINE_URL = "https://www.shufersal.co.il/online/he"
 
 
 def run(host: str = "127.0.0.1", port: int = 8765, profile_path: Path = DEFAULT_PROFILE_PATH) -> None:
@@ -82,8 +82,8 @@ def build_handler(
                     return
                 self._send_html(
                     _page(
-                        "\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d4\u05d6\u05de\u05e0\u05d4",
-                        render_shufersal_basket_quote(actor.id, basket),
+                        "\u05e1\u05d9\u05db\u05d5\u05dd \u05d4\u05d6\u05de\u05e0\u05d4",
+                        render_shufersal_order_review(actor.id, basket),
                     )
                 )
                 return
@@ -158,7 +158,8 @@ def build_handler(
                     require_permission(actor, "resolve_product_exceptions")
                     items_raw = form.get("items", "")
                     items = parse_shopping_list(items_raw)
-                    selected_offers: list[ShufersalProductOffer] = []
+                    selected_lines: list[tuple[ShufersalProductOffer, str]] = []
+                    validation_store = ShufersalBasketStore()
                     for index, item in enumerate(items):
                         item_code = form.get(f"selection_{index}", "").strip()
                         if not item_code:
@@ -166,14 +167,31 @@ def build_handler(
                         offers = offer_client.search(item_code, limit=1)
                         if not offers or offers[0].product.item_code != item_code:
                             raise ValueError("\u05d4\u05de\u05d5\u05e6\u05e8 \u05e9\u05e0\u05d1\u05d7\u05e8 \u05d0\u05d9\u05e0\u05d5 \u05e2\u05d5\u05d3 \u05d1\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d4\u05e2\u05d3\u05db\u05e0\u05d9.")
-                        selected_offers.append(offers[0])
+                        quantity = form.get(f"quantity_{index}", "1")
+                        selected_lines.append((offers[0], quantity))
+                        validation_store.add("validation", offers[0], quantity)
                     basket_store.clear(actor.id)
                     basket = ShufersalBasket()
-                    for offer in selected_offers:
-                        basket = basket_store.add(actor.id, offer, "1")
+                    for offer, quantity in selected_lines:
+                        basket = basket_store.add(actor.id, offer, quantity)
                     html = _page(
-                        "\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d4\u05d6\u05de\u05e0\u05d4",
-                        render_shufersal_basket_quote(actor.id, basket),
+                        "\u05e1\u05d9\u05db\u05d5\u05dd \u05d4\u05d6\u05de\u05e0\u05d4",
+                        render_shufersal_order_review(actor.id, basket),
+                    )
+                elif route.path == "/orders/shufersal-prepare":
+                    require_permission(actor, "choose_fulfillment")
+                    require_permission(actor, "approve_cart_preparation")
+                    basket = basket_store.get(actor.id)
+                    if not basket.lines:
+                        raise ValueError("\u05d4\u05e1\u05dc \u05e8\u05d9\u05e7.")
+                    fulfillment_mode = form.get("fulfillment_mode", "")
+                    if fulfillment_mode not in ("DELIVERY", "PICKUP"):
+                        raise ValueError("\u05d9\u05e9 \u05dc\u05d1\u05d7\u05d5\u05e8 \u05de\u05e9\u05dc\u05d5\u05d7 \u05d0\u05d5 \u05d0\u05d9\u05e1\u05d5\u05e3.")
+                    if BudgetPolicy().requires_acknowledgement(basket.estimated_total_ils) and form.get("budget_ack") != "yes":
+                        raise PermissionError(BUDGET_ACK_TEXT_HE)
+                    html = _page(
+                        "\u05d4\u05e1\u05dc \u05de\u05d5\u05db\u05df",
+                        render_shufersal_prepared_order(actor.id, basket, fulfillment_mode),
                     )
                 elif route.path == "/orders/recommend":
                     require_permission(actor, "choose_fulfillment")
@@ -368,7 +386,10 @@ def render_shufersal_match_form(
             options = '<p class="warning">\u05dc\u05d0 \u05e0\u05de\u05e6\u05d0\u05d4 \u05d4\u05ea\u05d0\u05de\u05d4 \u05d1\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d4\u05e6\u05d9\u05d1\u05d5\u05e8\u05d9.</p>'
         sections.append(
             f'<fieldset class="match-group"><legend>{escape(requested_item)}</legend>'
-            f'<div class="match-options">{options}</div></fieldset>'
+            f'<div class="match-options">{options}</div>'
+            f'<label class="match-quantity">\u05db\u05de\u05d5\u05ea '
+            f'<input type="number" name="quantity_{index}" value="1" min="0.01" max="100" step="0.01" required></label>'
+            f'</fieldset>'
         )
 
     disabled = "" if all_resolved and matches else "disabled"
@@ -380,18 +401,13 @@ def render_shufersal_match_form(
     <section class="band">
       <p class="eyebrow">\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE</p>
       <h1>\u05d1\u05d7\u05d9\u05e8\u05ea \u05d4\u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05d4\u05de\u05d3\u05d5\u05d9\u05e7\u05d9\u05dd</h1>
-      <p class="muted">\u05d4\u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05d5\u05d4\u05de\u05d1\u05e6\u05e2\u05d9\u05dd \u05e0\u05e7\u05e8\u05d0\u05d5 \u05db\u05e2\u05ea \u05de\u05d4\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d4\u05e6\u05d9\u05d1\u05d5\u05e8\u05d9. \u05d9\u05e9 \u05dc\u05d1\u05d7\u05d5\u05e8 \u05d0\u05e4\u05e9\u05e8\u05d5\u05ea \u05d0\u05d7\u05ea \u05dc\u05db\u05dc \u05e9\u05d5\u05e8\u05d4; \u05d4\u05de\u05e2\u05e8\u05db\u05ea \u05dc\u05d0 \u05ea\u05e0\u05d7\u05e9 \u05d0\u05d9\u05d6\u05d4 \u05de\u05d5\u05e6\u05e8 \u05e8\u05e6\u05d9\u05ea.</p>
+      <p class="muted">\u05d4\u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05d5\u05d4\u05de\u05d1\u05e6\u05e2\u05d9\u05dd \u05e0\u05e7\u05e8\u05d0\u05d5 \u05db\u05e2\u05ea \u05de\u05d4\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d4\u05e6\u05d9\u05d1\u05d5\u05e8\u05d9. \u05d9\u05e9 \u05dc\u05d1\u05d7\u05d5\u05e8 \u05de\u05d5\u05e6\u05e8 \u05d5\u05db\u05de\u05d5\u05ea \u05dc\u05db\u05dc \u05e9\u05d5\u05e8\u05d4; \u05d4\u05de\u05e2\u05e8\u05db\u05ea \u05dc\u05d0 \u05ea\u05e0\u05d7\u05e9 \u05d0\u05d9\u05d6\u05d4 \u05de\u05d5\u05e6\u05e8 \u05e8\u05e6\u05d9\u05ea.</p>
     </section>
     <form method="post" action="/orders/shufersal-match" class="quote-form">
       <input type="hidden" name="actor" value="{escape(actor_id)}">
       <textarea name="items" hidden>{escape(items_raw)}</textarea>
       {''.join(sections)}
       <div class="form-actions"><button type="submit" {disabled}>\u05d4\u05de\u05e9\u05da \u05e2\u05dd \u05d4\u05de\u05d5\u05e6\u05e8\u05d9\u05dd \u05e9\u05e0\u05d1\u05d7\u05e8\u05d5</button></div>
-    </form>
-    <form method="post" action="/orders/quotes/manual" class="form manual-fallback">
-      <input type="hidden" name="actor" value="{escape(actor_id)}">
-      <textarea name="items" hidden>{escape(items_raw)}</textarea>
-      <button type="submit" class="secondary">\u05de\u05e2\u05d1\u05e8 \u05dc\u05d4\u05e9\u05d5\u05d5\u05d0\u05d4 \u05d9\u05d3\u05e0\u05d9\u05ea</button>
     </form>
     """
 
@@ -411,20 +427,77 @@ def _render_match_option(index: int, offer: ShufersalProductOffer) -> str:
     """
 
 
-def render_shufersal_basket_quote(actor_id: str, basket: ShufersalBasket) -> str:
+def render_shufersal_order_review(
+    actor_id: str,
+    basket: ShufersalBasket,
+    fulfillment_mode: str = "DELIVERY",
+) -> str:
     if not basket.lines:
-        raise ValueError("\u05d9\u05e9 \u05dc\u05d1\u05d7\u05d5\u05e8 \u05dc\u05e4\u05d7\u05d5\u05ea \u05de\u05d5\u05e6\u05e8 \u05d0\u05d7\u05d3.")
-    prefill = RetailerQuotePrefill(
-        retailer="\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE",
-        subtotal=basket.regular_total_ils,
-        promotions=basket.public_savings_ils,
-        weighted=basket.has_weighted_items,
+        raise ValueError("\u05d4\u05e1\u05dc \u05e8\u05d9\u05e7.")
+    rows = "".join(
+        f"<tr><td>{escape(line.offer.product.name)}</td>"
+        f"<td>{line.quantity:g}</td>"
+        f"<td>\u20aa{line.offer.effective_price_ils}</td>"
+        f"<td>\u20aa{line.estimated_total_ils}</td></tr>"
+        for line in basket.lines
     )
-    return render_quote_form(
-        actor_id,
-        basket.shopping_list_text,
-        prefill=prefill,
+    delivery_selected = "selected" if fulfillment_mode == "DELIVERY" else ""
+    pickup_selected = "selected" if fulfillment_mode == "PICKUP" else ""
+    acknowledgement = (
+        f'<label class="ack"><input type="checkbox" name="budget_ack" value="yes" required> '
+        f'{escape(BUDGET_ACK_TEXT_HE)}</label>'
+        if BudgetPolicy().requires_acknowledgement(basket.estimated_total_ils)
+        else ""
     )
+    weight_notice = (
+        '<p class="warning">\u05d4\u05e1\u05db\u05d5\u05dd \u05db\u05d5\u05dc\u05dc \u05d4\u05e2\u05e8\u05db\u05ea \u05de\u05e9\u05e7\u05dc; \u05d4\u05d7\u05d9\u05d5\u05d1 \u05d4\u05e1\u05d5\u05e4\u05d9 \u05e2\u05e9\u05d5\u05d9 \u05dc\u05d4\u05e9\u05ea\u05e0\u05d5\u05ea \u05dc\u05e4\u05d9 \u05d4\u05de\u05e9\u05e7\u05dc \u05d1\u05e4\u05d5\u05e2\u05dc.</p>'
+        if basket.has_weighted_items
+        else ""
+    )
+    return f"""
+    <section class="toolbar"><a href="/orders/new?actor={escape(actor_id)}">\u05d7\u05d6\u05e8\u05d4 \u05dc\u05e8\u05e9\u05d9\u05de\u05d4</a></section>
+    <section class="band">
+      <p class="eyebrow">\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc ONLINE</p>
+      <h1>\u05e1\u05d9\u05db\u05d5\u05dd \u05d4\u05d6\u05de\u05e0\u05d4</h1>
+      <p class="muted">\u05d4\u05de\u05d7\u05d9\u05e8\u05d9\u05dd \u05d4\u05dd \u05de\u05d4\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d4\u05e6\u05d9\u05d1\u05d5\u05e8\u05d9. \u05d6\u05de\u05d9\u05e0\u05d5\u05ea, \u05d3\u05de\u05d9 \u05de\u05e9\u05dc\u05d5\u05d7, \u05d0\u05d9\u05e1\u05d5\u05e3 \u05d5\u05d4\u05e1\u05db\u05d5\u05dd \u05d4\u05e1\u05d5\u05e4\u05d9 \u05d9\u05d0\u05d5\u05e9\u05e8\u05d5 \u05d1\u05d0\u05ea\u05e8 \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc.</p>
+      {weight_notice}
+    </section>
+    <section class="table-band"><div class="table-wrap"><table class="order-summary-table">
+      <thead><tr><th>\u05e9\u05dd \u05d4\u05de\u05d5\u05e6\u05e8</th><th>\u05db\u05de\u05d5\u05ea</th><th>\u05de\u05d7\u05d9\u05e8 \u05dc\u05de\u05d5\u05e6\u05e8</th><th>\u05de\u05d7\u05d9\u05e8 \u05e1\u05d4\u05f4\u05db</th></tr></thead>
+      <tbody>{rows}</tbody>
+      <tfoot><tr><th colspan="3">\u05e1\u05d4\u05f4\u05db \u05de\u05d5\u05e6\u05e8\u05d9\u05dd</th><th>\u20aa{basket.estimated_total_ils}</th></tr></tfoot>
+    </table></div></section>
+    <form method="post" action="/orders/shufersal-prepare" class="form order-review-form">
+      <input type="hidden" name="actor" value="{escape(actor_id)}">
+      <label>\u05d0\u05d5\u05e4\u05df \u05e7\u05d1\u05dc\u05ea \u05d4\u05d4\u05d6\u05de\u05e0\u05d4
+        <select name="fulfillment_mode" required>
+          <option value="DELIVERY" {delivery_selected}>\u05de\u05e9\u05dc\u05d5\u05d7</option>
+          <option value="PICKUP" {pickup_selected}>\u05d0\u05d9\u05e1\u05d5\u05e3 - \u05d4\u05d6\u05de\u05d9\u05e0\u05d5\u05ea \u05ea\u05d9\u05d1\u05d3\u05e7 \u05d1\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc</option>
+        </select>
+      </label>
+      {acknowledgement}
+      <button type="submit">\u05d0\u05d9\u05e9\u05d5\u05e8 \u05d4\u05e1\u05dc \u05d5\u05d4\u05de\u05e9\u05da \u05dc\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc</button>
+    </form>
+    """
+
+
+def render_shufersal_prepared_order(
+    actor_id: str,
+    basket: ShufersalBasket,
+    fulfillment_mode: str,
+) -> str:
+    mode_label = "\u05de\u05e9\u05dc\u05d5\u05d7" if fulfillment_mode == "DELIVERY" else "\u05d0\u05d9\u05e1\u05d5\u05e3"
+    return f"""
+    <section class="toolbar"><a href="/?actor={escape(actor_id)}">\u05d3\u05e3 \u05d4\u05d1\u05d9\u05ea</a></section>
+    <section class="band success">
+      <p class="eyebrow">\u05d4\u05db\u05e0\u05ea \u05e1\u05dc \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc</p>
+      <h1>\u05d4\u05e1\u05dc \u05d4\u05de\u05e7\u05d5\u05de\u05d9 \u05de\u05d5\u05db\u05df</h1>
+      <p>\u05d4\u05e2\u05d3\u05e4\u05d4: <strong>{mode_label}</strong></p>
+      <p class="total">\u05e1\u05d4\u05f4\u05db \u05de\u05d5\u05e6\u05e8\u05d9\u05dd: <strong>\u20aa{basket.estimated_total_ils}</strong></p>
+      <p class="muted">\u05d4\u05e1\u05dc \u05dc\u05d0 \u05d4\u05d5\u05e2\u05d1\u05e8 \u05dc\u05e9\u05d5\u05e4\u05e8\u05e1\u05dc, \u05d5\u05dc\u05d0 \u05d1\u05d5\u05e6\u05e2\u05d5 \u05d4\u05d6\u05de\u05e0\u05d4 \u05d0\u05d5 \u05ea\u05e9\u05dc\u05d5\u05dd. \u05d9\u05e9 \u05dc\u05d4\u05e9\u05dc\u05d9\u05dd \u05d0\u05ea \u05d4\u05e7\u05e0\u05d9\u05d9\u05d4 \u05d1\u05d0\u05ea\u05e8 \u05d4\u05e7\u05de\u05e2\u05d5\u05e0\u05d0\u05d9.</p>
+      <a class="primary-link" href="{SHUFERSAL_ONLINE_URL}" target="_blank" rel="noopener noreferrer">\u05e4\u05ea\u05d9\u05d7\u05ea \u05e9\u05d5\u05e4\u05e8\u05e1\u05dc \u05dc\u05d4\u05e9\u05dc\u05de\u05ea \u05d4\u05e7\u05e0\u05d9\u05d9\u05d4</a>
+    </section>
+    """
 
 def render_shufersal_status(actor_id: str, status: ShufersalConnectionStatus) -> str:
     updated = escape(status.latest_price_update or "\u05dc\u05d0 \u05e0\u05de\u05e1\u05e8")
@@ -451,7 +524,7 @@ def render_shufersal_basket(actor_id: str, basket: ShufersalBasket) -> str:
     toolbar = f"""
     <section class="toolbar">
       <a href="/retailers/shufersal?actor={escape(actor_id)}">\u05d4\u05de\u05e9\u05da \u05d7\u05d9\u05e4\u05d5\u05e9</a>
-      <a href="/retailers/shufersal/basket/compare?actor={escape(actor_id)}">\u05de\u05e2\u05d1\u05e8 \u05dc\u05d4\u05e9\u05d5\u05d5\u05d0\u05ea \u05d4\u05d6\u05de\u05e0\u05d4</a>
+      <a href="/retailers/shufersal/basket/compare?actor={escape(actor_id)}">\u05de\u05e2\u05d1\u05e8 \u05dc\u05e1\u05d9\u05db\u05d5\u05dd \u05d4\u05d6\u05de\u05e0\u05d4</a>
     </section>
     """
     if not basket.lines:
@@ -710,7 +783,15 @@ def _page(title: str, body: str) -> str:
     .match-option:has(input:checked) {{ border-color: var(--accent); background: #eef8f3; }}
     .match-option input {{ width: 18px; height: 18px; min-height: auto; margin-top: 2px; }}
     .match-option small {{ color: var(--muted); white-space: normal; }}
-    .manual-fallback {{ padding-top: 0; }}
+    .match-quantity {{ margin-top: 12px; max-width: 180px; }}
+    .order-summary-table {{ min-width: 0; table-layout: fixed; }}
+    .order-summary-table th, .order-summary-table td {{
+      padding: 10px 6px;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }}
+    .order-summary-table th:first-child, .order-summary-table td:first-child {{ width: 40%; }}
+    .order-summary-table tfoot th {{ font-size: 16px; color: var(--ink); }}
     .connection-note {{
       padding: 12px;
       border-right: 4px solid var(--accent);
